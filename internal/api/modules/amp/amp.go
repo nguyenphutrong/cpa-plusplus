@@ -9,9 +9,9 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/api/modules"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/api/modules"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
+	sdkaccess "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/access"
 	log "github.com/sirupsen/logrus"
 )
 

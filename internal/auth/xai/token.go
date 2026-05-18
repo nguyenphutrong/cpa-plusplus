@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/misc"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/misc"
 	log "github.com/sirupsen/logrus"
 )
 

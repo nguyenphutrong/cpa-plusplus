@@ -17,12 +17,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/gemini"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/misc"
-	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/auth/gemini"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/interfaces"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/misc"
+	sdkAuth "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/auth"
+	cliproxyauth "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 )

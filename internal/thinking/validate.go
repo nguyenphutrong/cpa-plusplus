@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/registry"
 	log "github.com/sirupsen/logrus"
 )
 

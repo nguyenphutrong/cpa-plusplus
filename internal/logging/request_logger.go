@@ -24,10 +24,10 @@ import (
 	"github.com/klauspost/compress/zstd"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/buildinfo"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/buildinfo"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/home"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/interfaces"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/util"
 )
 
 var requestLogID atomic.Uint64

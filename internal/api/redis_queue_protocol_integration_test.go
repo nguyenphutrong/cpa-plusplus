@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/redisqueue"
 )
 
 type remoteAddrConn struct {

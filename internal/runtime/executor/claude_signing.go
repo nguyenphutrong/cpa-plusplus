@@ -5,9 +5,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
+	cliproxyauth "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/auth"
 	xxHash64 "github.com/pierrec/xxHash/xxHash64"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )

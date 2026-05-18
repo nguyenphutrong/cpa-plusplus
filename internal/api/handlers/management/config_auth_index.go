@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/synthesizer"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/watcher/synthesizer"
 )
 
 type geminiKeyWithAuthIndex struct {

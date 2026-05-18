@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	. "github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
+	. "github.com/nguyenphutrong/cpa-plusplus/v7/internal/constant"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/interfaces"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/registry"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/sdk/api/handlers"
 )
 
 // GeminiAPIHandler contains the handlers for Gemini API endpoints.

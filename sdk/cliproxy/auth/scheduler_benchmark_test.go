@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/registry"
+	cliproxyexecutor "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/executor"
 )
 
 type schedulerBenchmarkExecutor struct {

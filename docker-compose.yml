@@ -1,6 +1,6 @@
 services:
-  cli-proxy-api:
-    image: ${CLI_PROXY_IMAGE:-eceasy/cli-proxy-api:latest}
+  cpa-plusplus:
+    image: ${CPA_PLUSPLUS_IMAGE:-ghcr.io/nguyenphutrong/cpa-plusplus:latest}
     pull_policy: always
     build:
       context: .
@@ -9,7 +9,7 @@ services:
         VERSION: ${VERSION:-dev}
         COMMIT: ${COMMIT:-none}
         BUILD_DATE: ${BUILD_DATE:-unknown}
-    container_name: cli-proxy-api
+    container_name: cpa-plusplus
     # env_file:
     #   - .env
     environment:
@@ -22,7 +22,7 @@ services:
       - "51121:51121"
       - "11451:11451"
     volumes:
-      - ${CLI_PROXY_CONFIG_PATH:-./config.yaml}:/CLIProxyAPI/config.yaml
+      - ${CLI_PROXY_CONFIG_PATH:-./config.yaml}:/cpa-plusplus/config.yaml
       - ${CLI_PROXY_AUTH_PATH:-./auths}:/root/.cli-proxy-api
-      - ${CLI_PROXY_LOG_PATH:-./logs}:/CLIProxyAPI/logs
+      - ${CLI_PROXY_LOG_PATH:-./logs}:/cpa-plusplus/logs
     restart: unless-stopped

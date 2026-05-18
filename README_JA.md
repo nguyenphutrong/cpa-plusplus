@@ -1,6 +1,8 @@
-# CLI Proxy API
+# cpa-plusplus
 
 [English](README.md) | [中文](README_CN.md) | 日本語
+
+`cpa-plusplus` は [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) の `nguyenphutrong/cpa-plusplus` フォークです。CLIProxyAPI 互換性を保ちながら、独自のリリース、Docker イメージ、Go モジュールパスを公開します。
 
 CLI向けのOpenAI/Gemini/Claude/Codex/Grok互換APIインターフェースを提供するプロキシサーバーです。
 
@@ -60,7 +62,20 @@ PackyCodeは当ソフトウェアのユーザーに特別割引を提供して�
 
 ## はじめに
 
-CLIProxyAPIガイド：[https://help.router-for.me/](https://help.router-for.me/)
+上流のCLIProxyAPIガイド：[https://help.router-for.me/](https://help.router-for.me/)
+
+このフォークのリリースは [github.com/nguyenphutrong/cpa-plusplus/releases](https://github.com/nguyenphutrong/cpa-plusplus/releases) で公開されます。
+
+```bash
+go build -o cpa-plusplus ./cmd/server
+```
+
+## Docker
+
+```bash
+docker pull ghcr.io/nguyenphutrong/cpa-plusplus:latest
+docker run --rm -p 8317:8317 -v "$PWD/config.yaml:/cpa-plusplus/config.yaml" ghcr.io/nguyenphutrong/cpa-plusplus:latest
+```
 
 ## 管理API
 
@@ -84,7 +99,7 @@ CLIProxyAPI向けのローカル優先の使用量・クォータダッシュボ
 
 ## Amp CLIサポート
 
-CLIProxyAPIは[Amp CLI](https://ampcode.com)およびAmp IDE拡張機能の統合サポートを含んでおり、Google/ChatGPT/ClaudeのOAuthサブスクリプションをAmpのコーディングツールで使用できます：
+cpa-plusplusは[Amp CLI](https://ampcode.com)およびAmp IDE拡張機能の統合サポートを含んでおり、Google/ChatGPT/ClaudeのOAuthサブスクリプションをAmpのコーディングツールで使用できます：
 
 - Ampの APIパターン用のプロバイダールートエイリアス（`/api/provider/{provider}/v1...`）
 - OAuth認証およびアカウント機能用の管理プロキシ

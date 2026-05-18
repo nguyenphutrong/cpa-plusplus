@@ -1,6 +1,8 @@
-# CLI 代理 API
+# cpa-plusplus
 
 [English](README.md) | 中文 | [日本語](README_JA.md)
+
+`cpa-plusplus` 是 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的 `nguyenphutrong/cpa-plusplus` 分支。它保持 CLIProxyAPI 兼容性，同时发布独立的 Release、Docker 镜像和 Go 模块路径。
 
 一个为 CLI 提供 OpenAI/Gemini/Claude/Codex/Grok 兼容 API 接口的代理服务器。
 
@@ -62,7 +64,20 @@ VisionCoder 还为我们的用户提供 <a href="https://coder.visioncoder.cn" t
 
 ## 新手入门
 
-CLIProxyAPI 用户手册： [https://help.router-for.me/](https://help.router-for.me/cn/)
+上游 CLIProxyAPI 用户手册： [https://help.router-for.me/](https://help.router-for.me/cn/)
+
+本分支的 Release 发布在 [github.com/nguyenphutrong/cpa-plusplus/releases](https://github.com/nguyenphutrong/cpa-plusplus/releases)。
+
+```bash
+go build -o cpa-plusplus ./cmd/server
+```
+
+## Docker
+
+```bash
+docker pull ghcr.io/nguyenphutrong/cpa-plusplus:latest
+docker run --rm -p 8317:8317 -v "$PWD/config.yaml:/cpa-plusplus/config.yaml" ghcr.io/nguyenphutrong/cpa-plusplus:latest
+```
 
 ## 管理 API 文档
 
@@ -86,7 +101,7 @@ CLIProxyAPI 用户手册： [https://help.router-for.me/](https://help.router-fo
 
 ## Amp CLI 支持
 
-CLIProxyAPI 已内置对 [Amp CLI](https://ampcode.com) 和 Amp IDE 扩展的支持，可让你使用自己的 Google/ChatGPT/Claude OAuth 订阅来配合 Amp 编码工具：
+cpa-plusplus 已内置对 [Amp CLI](https://ampcode.com) 和 Amp IDE 扩展的支持，可让你使用自己的 Google/ChatGPT/Claude OAuth 订阅来配合 Amp 编码工具：
 
 - 提供商路由别名，兼容 Amp 的 API 路径模式（`/api/provider/{provider}/v1...`）
 - 管理代理，处理 OAuth 认证和账号功能

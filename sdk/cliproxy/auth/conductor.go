@@ -16,14 +16,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
+	internalconfig "github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/home"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/logging"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/registry"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/thinking"
+	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/util"
+	cliproxyexecutor "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/executor"
+	coreusage "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/usage"
 	log "github.com/sirupsen/logrus"
 )
 

@@ -1,6 +1,9 @@
-# CLI Proxy API
+# cpa-plusplus
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
+
+`cpa-plusplus` is the `nguyenphutrong/cpa-plusplus` fork of [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
+It keeps CLIProxyAPI compatibility while publishing its own releases, Docker images, and Go module path.
 
 A proxy server that provides OpenAI/Gemini/Claude/Codex/Grok compatible API interfaces for CLI.
 
@@ -62,11 +65,24 @@ VisionCoder is also offering our users a limited-time <a href="https://coder.vis
 
 ## Getting Started
 
-CLIProxyAPI Guides: [https://help.router-for.me/](https://help.router-for.me/)
+Upstream CLIProxyAPI guides: [https://help.router-for.me/](https://help.router-for.me/)
+
+Fork releases are published at [github.com/nguyenphutrong/cpa-plusplus/releases](https://github.com/nguyenphutrong/cpa-plusplus/releases).
+
+```bash
+go build -o cpa-plusplus ./cmd/server
+```
+
+## Docker
+
+```bash
+docker pull ghcr.io/nguyenphutrong/cpa-plusplus:latest
+docker run --rm -p 8317:8317 -v "$PWD/config.yaml:/cpa-plusplus/config.yaml" ghcr.io/nguyenphutrong/cpa-plusplus:latest
+```
 
 ## Management API
 
-see [MANAGEMENT_API.md](https://help.router-for.me/management/api)
+See the upstream-compatible [Management API](https://help.router-for.me/management/api).
 
 ## Usage Statistics
 
@@ -86,7 +102,7 @@ Full CLIProxyAPI management center with request-level monitoring and cost estima
 
 ## Amp CLI Support
 
-CLIProxyAPI includes integrated support for [Amp CLI](https://ampcode.com) and Amp IDE extensions, enabling you to use your Google/ChatGPT/Claude OAuth subscriptions with Amp's coding tools:
+cpa-plusplus includes integrated support for [Amp CLI](https://ampcode.com) and Amp IDE extensions, enabling you to use your Google/ChatGPT/Claude OAuth subscriptions with Amp's coding tools:
 
 - Provider route aliases for Amp's API patterns (`/api/provider/{provider}/v1...`)
 - Management proxy for OAuth authentication and account features
