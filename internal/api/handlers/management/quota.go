@@ -1,6 +1,11 @@
 package management
 
-import "github.com/gin-gonic/gin"
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota"
+)
 
 // Quota exceeded toggles
 func (h *Handler) GetSwitchProject(c *gin.Context) {
@@ -15,4 +20,67 @@ func (h *Handler) GetSwitchPreviewModel(c *gin.Context) {
 }
 func (h *Handler) PutSwitchPreviewModel(c *gin.Context) {
 	h.updateBoolField(c, func(v bool) { h.cfg.QuotaExceeded.SwitchPreviewModel = v })
+}
+
+func (h *Handler) GetQuota(c *gin.Context) {
+	service := h.quotaService()
+	if service == nil {
+		c.JSON(http.StatusOK, quota.BuildQuotaView(nil, nil))
+		return
+	}
+	c.JSON(http.StatusOK, quota.BuildQuotaView(service.Auths(), service.SupportsProvider))
+}
+
+func (h *Handler) GetQuotaSummary(c *gin.Context) {
+	service := h.quotaService()
+	if service == nil {
+		c.JSON(http.StatusOK, quota.QuotaSummaryView{})
+		return
+	}
+	view := quota.BuildQuotaView(service.Auths(), service.SupportsProvider)
+	c.JSON(http.StatusOK, quota.BuildQuotaSummaryView(view))
+}
+
+func (h *Handler) PostQuotaRefresh(c *gin.Context) {
+	service := h.quotaService()
+	if service == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "quota sync is not configured"})
+		return
+	}
+
+	provider := c.Param("provider")
+	authID := c.Param("authID")
+	if provider == "" && authID == "" {
+		view, _ := service.SyncAll(c.Request.Context())
+		c.JSON(http.StatusOK, view)
+		return
+	}
+	if provider == "" || authID == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "credential not found"})
+		return
+	}
+	if capability := quota.SupportsProvider(provider); !capability.Supported {
+		c.JSON(http.StatusConflict, gin.H{"error": capability.Reason})
+		return
+	}
+
+	for _, auth := range service.Auths() {
+		if auth == nil || auth.ID != authID || quota.ProviderKey(auth) != quota.ProviderKeyForName(provider) {
+			continue
+		}
+		if _, err := service.SyncCredential(c.Request.Context(), auth); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, quota.BuildQuotaView(service.Auths(), service.SupportsProvider))
+		return
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "credential not found"})
+}
+
+func (h *Handler) quotaService() *quota.SyncService {
+	if h == nil || h.authManager == nil {
+		return nil
+	}
+	return quota.NewSyncService(h.authManager, h.resolveTokenForAuth)
 }
