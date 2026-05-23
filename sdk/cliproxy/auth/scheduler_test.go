@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/registry"
-	cliproxyexecutor "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
 type schedulerTestExecutor struct{}

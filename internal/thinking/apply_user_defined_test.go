@@ -3,9 +3,9 @@ package thinking_test
 import (
 	"testing"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/registry"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/thinking"
-	_ "github.com/nguyenphutrong/cpa-plusplus/v7/internal/thinking/provider/claude"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
+	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/claude"
 	"github.com/tidwall/gjson"
 )
 

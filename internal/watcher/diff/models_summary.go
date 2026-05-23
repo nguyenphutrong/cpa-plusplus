@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 )
 
 type GeminiModelsSummary struct {

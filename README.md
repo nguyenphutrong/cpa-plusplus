@@ -2,12 +2,12 @@
 
 `cpa-plusplus` is the `nguyenphutrong/cpa-plusplus` fork of
 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). It keeps upstream API
-compatibility while publishing its own Go module, release artifacts, and Docker image.
+compatibility while publishing its own release artifacts and Docker image.
 
 - Repository: <https://github.com/nguyenphutrong/cpa-plusplus>
 - Releases: <https://github.com/nguyenphutrong/cpa-plusplus/releases>
 - Docker image: `ghcr.io/nguyenphutrong/cpa-plusplus`
-- Go module: `github.com/nguyenphutrong/cpa-plusplus/v7`
+- Go module: `github.com/router-for-me/CLIProxyAPI/v7`
 
 ## Features
 
@@ -61,7 +61,7 @@ Key fields:
 ## SDK
 
 ```bash
-go get github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy
+go get github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy
 ```
 
 Docs:

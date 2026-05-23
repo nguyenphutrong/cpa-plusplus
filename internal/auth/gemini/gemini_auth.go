@@ -13,12 +13,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/auth/codex"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/browser"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/misc"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/util"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/sdk/proxyutil"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codex"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/browser"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/misc"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 

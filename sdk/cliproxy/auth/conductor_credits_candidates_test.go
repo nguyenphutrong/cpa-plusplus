@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	cliproxyexecutor "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/executor"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
 func TestFindAllAntigravityCreditsCandidateAuths_PrefersKnownCreditsThenUnknown(t *testing.T) {

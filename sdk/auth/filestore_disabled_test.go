@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	cliproxyauth "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/auth"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 type testTokenStorage struct {

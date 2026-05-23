@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/auth/gemini"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/gemini"
 	// legacy client removed
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
-	coreauth "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 // GeminiAuthenticator implements the login flow for Google Gemini CLI accounts.

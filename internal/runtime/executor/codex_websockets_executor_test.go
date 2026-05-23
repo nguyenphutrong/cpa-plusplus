@@ -12,11 +12,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
-	cliproxyauth "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/executor"
-	sdkconfig "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/config"
-	sdktranslator "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/translator"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
+	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
 	"github.com/tidwall/gjson"
 )
 

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	sdkaccess "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/access"
-	sdkconfig "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/config"
+	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
+	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 )
 
 // Register ensures the config-access provider is available to the access manager.

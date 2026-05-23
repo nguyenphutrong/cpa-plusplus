@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/api"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy"
 	log "github.com/sirupsen/logrus"
 )
 

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/auth/claude"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
-	sdkAuth "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/claude"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	log "github.com/sirupsen/logrus"
 )
 

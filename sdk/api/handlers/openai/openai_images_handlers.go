@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	internalconfig "github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/interfaces"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/sdk/api/handlers"
+	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"

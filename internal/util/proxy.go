@@ -6,8 +6,8 @@ package util
 import (
 	"net/http"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/sdk/config"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/sdk/proxyutil"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
 )
 

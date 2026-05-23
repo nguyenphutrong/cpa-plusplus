@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
-	cliproxyauth "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/auth"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/sdk/proxyutil"
 	tls "github.com/refraction-networking/utls"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/proxy"

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 )
 
 func TestAuthDispatchRequestIncludesCount(t *testing.T) {

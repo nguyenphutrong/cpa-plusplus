@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
-	coreauth "github.com/nguyenphutrong/cpa-plusplus/v7/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
 // Manager aggregates authenticators and coordinates persistence via a token store.

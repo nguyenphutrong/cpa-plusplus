@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/config"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
 )
 

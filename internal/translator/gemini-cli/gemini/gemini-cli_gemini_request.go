@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/translator/gemini/common"
-	"github.com/nguyenphutrong/cpa-plusplus/v7/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/translator/gemini/common"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
