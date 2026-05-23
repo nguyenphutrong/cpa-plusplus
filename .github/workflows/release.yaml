@@ -3,7 +3,7 @@ name: goreleaser
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*-plus.*'
 
 permissions:
   contents: write
