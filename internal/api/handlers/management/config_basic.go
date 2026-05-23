@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	latestReleaseURL       = "https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest"
-	latestReleaseUserAgent = "CLIProxyAPI"
+	latestReleaseURL       = "https://api.github.com/repos/nguyenphutrong/cpa-plusplus/releases/latest"
+	latestReleaseUserAgent = "cpa-plusplus"
 )
 
 func (h *Handler) GetConfig(c *gin.Context) {
