@@ -17,7 +17,7 @@ import (
 
 const (
 	DefaultRegion          = "us-east-1"
-	defaultKiroClientName  = "quotio"
+	defaultKiroClientName  = "cpa-plusplus"
 	defaultKiroClientType  = "public"
 	defaultKiroIssuerURL   = "https://auth.aws.amazon.com"
 	defaultKiroRefreshURL  = "https://prod.us-east-1.auth.desktop.kiro.dev/refreshToken"

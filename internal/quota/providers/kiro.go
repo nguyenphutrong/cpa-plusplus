@@ -75,9 +75,11 @@ func (k *Kiro) Provider() string {
 }
 
 func (k *Kiro) Fetch(ctx context.Context, credential QuotaFetchInput) (storage.QuotaData, error) {
-	authMethod := strings.TrimSpace(credential.Headers["x-quotio-kiro-auth-method"])
-	profileARN := kiroauth.ResolveProfileARNForRequest(authMethod, credential.Headers["x-quotio-kiro-profile-arn"])
-	region := kiroauth.ResolveRegionForRequest(credential.Headers["x-quotio-kiro-profile-arn"], credential.Headers["x-quotio-kiro-region"])
+	authMethod := inputString(credential, "auth_method", "kiro_auth_method")
+	profileARNInput := inputString(credential, "profile_arn", "kiro_profile_arn")
+	regionInput := inputString(credential, "region", "kiro_region")
+	profileARN := kiroauth.ResolveProfileARNForRequest(authMethod, profileARNInput)
+	region := kiroauth.ResolveRegionForRequest(profileARNInput, regionInput)
 	isDeviceCodeLike := strings.EqualFold(authMethod, "device_code") || strings.EqualFold(authMethod, "idc")
 	if isDeviceCodeLike && strings.TrimSpace(profileARN) == "" {
 		return buildKiroQuotaUnavailableData("profileArn is missing for device_code/idc session"), nil
@@ -112,14 +114,14 @@ func (k *Kiro) Fetch(ctx context.Context, credential QuotaFetchInput) (storage.Q
 		bundle, refreshErr := kiroauth.NewService(nil).RefreshTokens(
 			ctx,
 			credential.OAuthRefreshToken,
-			strings.TrimSpace(credential.Headers["x-quotio-kiro-client-id"]),
-			strings.TrimSpace(credential.Headers["x-quotio-kiro-client-secret"]),
-			firstNonEmpty(strings.TrimSpace(credential.Headers["x-quotio-kiro-region"]), kiroauth.DefaultRegion),
+			inputString(credential, "client_id", "kiro_client_id"),
+			inputString(credential, "client_secret", "kiro_client_secret"),
+			firstNonEmpty(inputString(credential, "region", "kiro_region"), kiroauth.DefaultRegion),
 		)
 		if refreshErr == nil && strings.TrimSpace(bundle.AccessToken) != "" {
 			if strings.TrimSpace(bundle.ProfileARN) != "" {
 				profileARN = kiroauth.ResolveProfileARNForRequest(authMethod, bundle.ProfileARN)
-				region = kiroauth.ResolveRegionForRequest(bundle.ProfileARN, credential.Headers["x-quotio-kiro-region"])
+				region = kiroauth.ResolveRegionForRequest(bundle.ProfileARN, regionInput)
 			}
 			result, _ = runAttempts(strings.TrimSpace(bundle.AccessToken))
 		}

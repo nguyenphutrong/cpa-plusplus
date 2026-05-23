@@ -30,6 +30,8 @@ type QuotaFetchInput struct {
 	Secret              string
 	BaseURL             string
 	Headers             map[string]string
+	Attributes          map[string]string
+	Metadata            map[string]any
 	Label               string
 	ValidationAccountID string
 	OAuthAccountID      string

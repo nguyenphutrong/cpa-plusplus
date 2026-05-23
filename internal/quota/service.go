@@ -96,6 +96,8 @@ func (s *SyncService) SyncCredential(ctx context.Context, auth *coreauth.Auth) (
 		Secret:              secret,
 		BaseURL:             baseURL(auth),
 		Headers:             quotaHeaders(auth),
+		Attributes:          cloneStringMap(auth.Attributes),
+		Metadata:            cloneAnyMap(auth.Metadata),
 		Label:               auth.Label,
 		ValidationAccountID: authAccountLabel(auth),
 		OAuthAccountID:      authAccountLabel(auth),
@@ -237,15 +239,29 @@ func quotaHeaders(auth *coreauth.Auth) map[string]string {
 	for key, value := range coreauth.ExtractCustomHeadersFromMetadata(auth.Metadata) {
 		headers[key] = value
 	}
-	for key, value := range auth.Attributes {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(key)), "x-quotio-") {
-			headers[key] = value
-		}
-	}
-	if projectID := stringMetadata(auth.Metadata, "project_id"); projectID != "" {
-		headers["x-quotio-antigravity-project-id"] = projectID
-	}
 	return headers
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneAnyMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 func stringMetadata(metadata map[string]any, key string) string {

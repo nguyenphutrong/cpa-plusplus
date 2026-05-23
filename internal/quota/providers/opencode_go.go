@@ -18,24 +18,14 @@ import (
 )
 
 const (
-	opencodeGoQuotaWorkspaceIDHeader = "x-quotio-opencode-go-workspace-id"
-	opencodeGoQuotaAuthCookieHeader  = "x-quotio-opencode-go-auth-cookie"
-	opencodeGoBaseURL                = "https://opencode.ai"
-	opencodeGoUserAgent              = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+	opencodeGoBaseURL   = "https://opencode.ai"
+	opencodeGoUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
 )
 
 var opencodeGoAllowedCookieNames = map[string]bool{
 	"auth":        true,
 	"__Host-auth": true,
 	"oc_locale":   true,
-}
-
-func OpencodeGoQuotaWorkspaceIDHeader() string {
-	return opencodeGoQuotaWorkspaceIDHeader
-}
-
-func OpencodeGoQuotaAuthCookieHeader() string {
-	return opencodeGoQuotaAuthCookieHeader
 }
 
 var (
@@ -74,21 +64,21 @@ func (o *OpenCodeGo) Provider() string {
 
 func (o *OpenCodeGo) Fetch(ctx context.Context, credential QuotaFetchInput) (storage.QuotaData, error) {
 	now := time.Now().UTC()
-	workspaceID := strings.TrimSpace(credential.Headers[opencodeGoQuotaWorkspaceIDHeader])
-	authCookie := strings.TrimSpace(credential.Headers[opencodeGoQuotaAuthCookieHeader])
+	workspaceID := inputString(credential, "workspace_id", "opencode_go_workspace_id")
+	authCookie := inputString(credential, "auth_cookie", "opencode_go_auth_cookie", "cookie")
 
 	if workspaceID == "" {
 		o.logger.Info("opencode-go quota fetch skipped: missing workspace id", slog.String("credential_id", credential.CredentialID))
 		return storage.QuotaData{
 			UpdatedAt: now,
-			Error:     fmt.Sprintf("quota not configured: missing %s header", opencodeGoQuotaWorkspaceIDHeader),
+			Error:     "quota not configured: missing workspace_id auth metadata",
 		}, nil
 	}
 	if authCookie == "" {
 		o.logger.Info("opencode-go quota fetch skipped: missing auth cookie", slog.String("credential_id", credential.CredentialID))
 		return storage.QuotaData{
 			UpdatedAt: now,
-			Error:     fmt.Sprintf("quota not configured: missing %s header", opencodeGoQuotaAuthCookieHeader),
+			Error:     "quota not configured: missing auth_cookie auth metadata",
 		}, nil
 	}
 

@@ -94,7 +94,7 @@ func (a *Antigravity) Fetch(ctx context.Context, input QuotaFetchInput) (storage
 		return storage.QuotaData{}, fmt.Errorf("antigravity quota parse failed: %w", err)
 	}
 
-	projectID := strings.TrimSpace(input.Headers["x-quotio-antigravity-project-id"])
+	projectID := inputString(input, "project_id", "antigravity_project_id")
 	if projectID == "" {
 		projectID = parseAntigravityProjectID(load.CloudAICompanionProject)
 	}

@@ -301,23 +301,19 @@ func (g *GitHubCopilot) fetchModels(ctx context.Context, credential QuotaFetchIn
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Api-Version", "2026-01-09")
 	req.Header.Set("Editor-Device-Id", firstString(
-		strings.TrimSpace(credential.Headers["editor-device-id"]),
-		strings.TrimSpace(credential.Headers["x-quotio-editor-device-id"]),
-		"quotio-server",
+		inputString(credential, "editor-device-id", "editor_device_id"),
+		"cpa-plusplus",
 	))
 	req.Header.Set("Editor-Plugin-Version", firstString(
-		strings.TrimSpace(credential.Headers["editor-plugin-version"]),
-		strings.TrimSpace(credential.Headers["x-quotio-editor-plugin-version"]),
+		inputString(credential, "editor-plugin-version", "editor_plugin_version"),
 		"copilot-chat/0.47.2026042902",
 	))
 	req.Header.Set("Editor-Version", firstString(
-		strings.TrimSpace(credential.Headers["editor-version"]),
-		strings.TrimSpace(credential.Headers["x-quotio-editor-version"]),
+		inputString(credential, "editor-version", "editor_version"),
 		"vscode/1.119.0-insider",
 	))
 	req.Header.Set("User-Agent", firstString(
-		strings.TrimSpace(credential.Headers["user-agent"]),
-		strings.TrimSpace(credential.Headers["x-quotio-user-agent"]),
+		inputString(credential, "user-agent", "user_agent"),
 		"GitHubCopilotChat/0.47.2026042902",
 	))
 	resp, err := g.client.Do(req)
