@@ -1,5 +1,6 @@
 # Binaries
 cli-proxy-api
+cpa-plusplus
 *.exe
 
 # Configuration
