@@ -96,8 +96,6 @@ func (o *OpenAI) convertToQuotaData(usage openAIUsageResponse) storage.QuotaData
 	pData.PlanDisplayName = usage.PlanType
 
 	if usage.RateLimit != nil {
-		pData.IsForbidden = usage.RateLimit.LimitReached
-
 		if usage.RateLimit.PrimaryWindow != nil {
 			remainingPercent, usedPercent := quotaPercentPointers(100 - usage.RateLimit.PrimaryWindow.UsedPercent)
 			pData.Models = append(pData.Models, storage.QuotaModel{
