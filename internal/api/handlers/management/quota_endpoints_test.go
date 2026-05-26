@@ -43,7 +43,7 @@ func TestGetQuotaReturnsEmptyView(t *testing.T) {
 func TestProviderQuotaCompatibilityEndpointsReturnView(t *testing.T) {
 	router, _ := testQuotaRouter(t)
 
-	for _, path := range []string{"/v0/management/copilot-quota", "/v0/management/kiro-quota"} {
+	for _, path := range []string{"/v0/management/copilot-quota", "/v0/management/kiro-quota", "/v0/management/quota/providers/github-copilot"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.Header.Set("Authorization", "Bearer test-management-key")
 		rec := httptest.NewRecorder()
@@ -107,6 +107,7 @@ func testQuotaRouter(t *testing.T) (*gin.Engine, *coreauth.Manager) {
 	group.Use(handler.Middleware())
 	group.GET("/quota", handler.GetQuota)
 	group.GET("/quota/summary", handler.GetQuotaSummary)
+	group.GET("/quota/providers/:provider", handler.GetProviderQuota)
 	group.GET("/copilot-quota", handler.GetCopilotQuota)
 	group.GET("/kiro-quota", handler.GetKiroQuota)
 	group.POST("/quota/refresh", handler.PostQuotaRefresh)
