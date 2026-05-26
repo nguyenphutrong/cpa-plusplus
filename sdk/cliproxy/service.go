@@ -117,6 +117,8 @@ func newDefaultAuthManager() *sdkAuth.Manager {
 		sdkAuth.NewCodexAuthenticator(),
 		sdkAuth.NewClaudeAuthenticator(),
 		sdkAuth.NewXAIAuthenticator(),
+		sdkAuth.NewGitHubCopilotAuthenticator(),
+		sdkAuth.NewKiroAuthenticator(),
 	)
 }
 
@@ -439,6 +441,10 @@ func (s *Service) ensureExecutorsForAuthWithMode(a *coreauth.Auth, forceReplace 
 		return
 	case "antigravity":
 		s.coreManager.RegisterExecutor(executor.NewAntigravityExecutor(s.cfg))
+	case "github-copilot":
+		s.coreManager.RegisterExecutor(executor.NewGitHubCopilotExecutor(s.cfg))
+	case "kiro":
+		s.coreManager.RegisterExecutor(executor.NewKiroExecutor(s.cfg))
 	case "claude":
 		s.coreManager.RegisterExecutor(executor.NewClaudeExecutor(s.cfg))
 	case "kimi":
@@ -600,6 +606,8 @@ func (s *Service) registerHomeExecutors() {
 	s.coreManager.RegisterExecutor(executor.NewGeminiCLIExecutor(s.cfg))
 	s.coreManager.RegisterExecutor(executor.NewAIStudioExecutor(s.cfg, "", s.wsGateway))
 	s.coreManager.RegisterExecutor(executor.NewAntigravityExecutor(s.cfg))
+	s.coreManager.RegisterExecutor(executor.NewGitHubCopilotExecutor(s.cfg))
+	s.coreManager.RegisterExecutor(executor.NewKiroExecutor(s.cfg))
 	s.coreManager.RegisterExecutor(executor.NewKimiExecutor(s.cfg))
 	s.coreManager.RegisterExecutor(executor.NewOpenAICompatExecutor("openai-compatibility", s.cfg))
 }
@@ -1134,6 +1142,20 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 		models = applyExcludedModels(models, excluded)
 	case "antigravity":
 		models = registry.GetAntigravityModels()
+		models = applyExcludedModels(models, excluded)
+	case "github-copilot":
+		if live := liveInventoryModelInfos(a, provider, "github-copilot", "github-copilot"); len(live) > 0 {
+			models = live
+		} else {
+			models = registry.GetGitHubCopilotModels()
+		}
+		models = applyExcludedModels(models, excluded)
+	case "kiro":
+		if live := liveInventoryModelInfos(a, provider, "kiro", "kiro"); len(live) > 0 {
+			models = live
+		} else {
+			models = registry.GetKiroModels()
+		}
 		models = applyExcludedModels(models, excluded)
 	case "claude":
 		models = registry.GetClaudeModels()

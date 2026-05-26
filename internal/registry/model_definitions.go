@@ -15,18 +15,20 @@ const (
 
 // staticModelsJSON mirrors the top-level structure of models.json.
 type staticModelsJSON struct {
-	Claude      []*ModelInfo `json:"claude"`
-	Gemini      []*ModelInfo `json:"gemini"`
-	Vertex      []*ModelInfo `json:"vertex"`
-	GeminiCLI   []*ModelInfo `json:"gemini-cli"`
-	AIStudio    []*ModelInfo `json:"aistudio"`
-	CodexFree   []*ModelInfo `json:"codex-free"`
-	CodexTeam   []*ModelInfo `json:"codex-team"`
-	CodexPlus   []*ModelInfo `json:"codex-plus"`
-	CodexPro    []*ModelInfo `json:"codex-pro"`
-	Kimi        []*ModelInfo `json:"kimi"`
-	Antigravity []*ModelInfo `json:"antigravity"`
-	XAI         []*ModelInfo `json:"xai"`
+	Claude        []*ModelInfo `json:"claude"`
+	Gemini        []*ModelInfo `json:"gemini"`
+	Vertex        []*ModelInfo `json:"vertex"`
+	GeminiCLI     []*ModelInfo `json:"gemini-cli"`
+	AIStudio      []*ModelInfo `json:"aistudio"`
+	CodexFree     []*ModelInfo `json:"codex-free"`
+	CodexTeam     []*ModelInfo `json:"codex-team"`
+	CodexPlus     []*ModelInfo `json:"codex-plus"`
+	CodexPro      []*ModelInfo `json:"codex-pro"`
+	Kimi          []*ModelInfo `json:"kimi"`
+	Antigravity   []*ModelInfo `json:"antigravity"`
+	GitHubCopilot []*ModelInfo `json:"github-copilot"`
+	Kiro          []*ModelInfo `json:"kiro"`
+	XAI           []*ModelInfo `json:"xai"`
 }
 
 // GetClaudeModels returns the standard Claude model definitions.
@@ -82,6 +84,16 @@ func GetKimiModels() []*ModelInfo {
 // GetAntigravityModels returns the standard Antigravity model definitions.
 func GetAntigravityModels() []*ModelInfo {
 	return cloneModelInfos(getModels().Antigravity)
+}
+
+// GetGitHubCopilotModels returns the standard GitHub Copilot model definitions.
+func GetGitHubCopilotModels() []*ModelInfo {
+	return cloneModelInfos(getModels().GitHubCopilot)
+}
+
+// GetKiroModels returns the standard Kiro model definitions.
+func GetKiroModels() []*ModelInfo {
+	return cloneModelInfos(getModels().Kiro)
 }
 
 // GetXAIModels returns the standard xAI Grok model definitions.
@@ -223,6 +235,8 @@ func cloneModelInfos(models []*ModelInfo) []*ModelInfo {
 //   - codex
 //   - kimi
 //   - antigravity
+//   - github-copilot
+//   - kiro
 //   - xai
 func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 	key := strings.ToLower(strings.TrimSpace(channel))
@@ -243,6 +257,10 @@ func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 		return GetKimiModels()
 	case "antigravity":
 		return GetAntigravityModels()
+	case "github-copilot", "copilot":
+		return GetGitHubCopilotModels()
+	case "kiro":
+		return GetKiroModels()
 	case "xai", "x-ai", "grok":
 		return GetXAIModels()
 	default:
@@ -267,6 +285,8 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 		data.CodexPro,
 		data.Kimi,
 		data.Antigravity,
+		data.GitHubCopilot,
+		data.Kiro,
 		data.XAI,
 	}
 	for _, models := range allModels {

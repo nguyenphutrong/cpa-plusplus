@@ -2198,7 +2198,110 @@
         ]
       }
     }
-
+  ],
+  "github-copilot": [
+    {
+      "id": "gpt-5.1",
+      "object": "model",
+      "created": 1762905600,
+      "owned_by": "github-copilot",
+      "type": "openai",
+      "display_name": "GPT 5.1",
+      "context_length": 400000,
+      "max_completion_tokens": 128000
+    },
+    {
+      "id": "gpt-5.2-codex",
+      "object": "model",
+      "created": 1765584000,
+      "owned_by": "github-copilot",
+      "type": "openai-response",
+      "display_name": "GPT 5.2 Codex",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_endpoints": [
+        "/responses"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "claude-sonnet-4.5",
+      "object": "model",
+      "created": 1759104000,
+      "owned_by": "github-copilot",
+      "type": "openai",
+      "display_name": "Claude Sonnet 4.5",
+      "context_length": 200000,
+      "max_completion_tokens": 64000
+    },
+    {
+      "id": "claude-opus-4.5",
+      "object": "model",
+      "created": 1763424000,
+      "owned_by": "github-copilot",
+      "type": "openai",
+      "display_name": "Claude Opus 4.5",
+      "context_length": 200000,
+      "max_completion_tokens": 64000
+    },
+    {
+      "id": "gemini-3-pro-preview",
+      "object": "model",
+      "created": 1763337600,
+      "owned_by": "github-copilot",
+      "type": "openai",
+      "display_name": "Gemini 3 Pro Preview",
+      "context_length": 1000000,
+      "max_completion_tokens": 65536
+    }
+  ],
+  "kiro": [
+    {
+      "id": "kiro-auto",
+      "object": "model",
+      "created": 1759104000,
+      "owned_by": "kiro",
+      "type": "kiro",
+      "display_name": "Kiro Auto",
+      "context_length": 200000,
+      "max_completion_tokens": 64000
+    },
+    {
+      "id": "kiro-claude-sonnet-4.5",
+      "object": "model",
+      "created": 1759104000,
+      "owned_by": "kiro",
+      "type": "kiro",
+      "display_name": "Kiro Claude Sonnet 4.5",
+      "context_length": 200000,
+      "max_completion_tokens": 64000
+    },
+    {
+      "id": "kiro-claude-opus-4.5",
+      "object": "model",
+      "created": 1763424000,
+      "owned_by": "kiro",
+      "type": "kiro",
+      "display_name": "Kiro Claude Opus 4.5",
+      "context_length": 200000,
+      "max_completion_tokens": 64000
+    },
+    {
+      "id": "kiro-agentic-sonnet-4.5",
+      "object": "model",
+      "created": 1759104000,
+      "owned_by": "kiro",
+      "type": "kiro",
+      "display_name": "Kiro Agentic Sonnet 4.5",
+      "context_length": 200000,
+      "max_completion_tokens": 64000
+    }
   ],
   "xai": [
     {
