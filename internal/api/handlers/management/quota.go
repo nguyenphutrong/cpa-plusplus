@@ -39,6 +39,15 @@ func (h *Handler) GetKiroQuota(c *gin.Context) {
 	h.getProviderQuota(c, "kiro")
 }
 
+func (h *Handler) GetProviderQuota(c *gin.Context) {
+	provider := c.Param("provider")
+	if provider == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provider is required"})
+		return
+	}
+	h.getProviderQuota(c, provider)
+}
+
 func (h *Handler) getProviderQuota(c *gin.Context, provider string) {
 	service := h.quotaService()
 	if service == nil {

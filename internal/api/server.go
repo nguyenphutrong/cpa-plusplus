@@ -531,6 +531,21 @@ func (s *Server) setupRoutes() {
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
 	})
 
+	s.engine.GET("/v0/oauth/callback/:provider", func(c *gin.Context) {
+		provider := c.Param("provider")
+		code := c.Query("code")
+		state := c.Query("state")
+		errStr := c.Query("error")
+		if errStr == "" {
+			errStr = c.Query("error_description")
+		}
+		if state != "" {
+			_, _ = managementHandlers.WriteOAuthCallbackFileForPendingSession(s.cfg.AuthDir, provider, state, code, errStr)
+		}
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, oauthCallbackSuccessHTML)
+	})
+
 	// Management routes are registered lazily by registerManagementRoutes when a secret is configured.
 }
 
@@ -626,6 +641,7 @@ func (s *Server) registerManagementRoutes() {
 
 		mgmt.GET("/quota", s.mgmt.GetQuota)
 		mgmt.GET("/quota/summary", s.mgmt.GetQuotaSummary)
+		mgmt.GET("/quota/providers/:provider", s.mgmt.GetProviderQuota)
 		mgmt.POST("/quota/refresh", s.mgmt.PostQuotaRefresh)
 		mgmt.POST("/quota/refresh/:provider/:authID", s.mgmt.PostQuotaRefresh)
 		mgmt.GET("/copilot-quota", s.mgmt.GetCopilotQuota)
@@ -733,6 +749,18 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PATCH("/auth-files/status", s.mgmt.PatchAuthFileStatus)
 		mgmt.PATCH("/auth-files/fields", s.mgmt.PatchAuthFileFields)
 		mgmt.POST("/vertex/import", s.mgmt.ImportVertexCredential)
+
+		mgmt.POST("/providers/oauth/start", s.mgmt.StartProviderOAuth)
+		mgmt.POST("/providers/oauth/callback", s.mgmt.PostProviderOAuthCallback)
+		mgmt.GET("/providers/oauth/sessions/:sessionID", s.mgmt.GetProviderOAuthSession)
+		mgmt.DELETE("/providers/oauth/sessions/:sessionID", s.mgmt.DeleteProviderOAuthSession)
+		mgmt.GET("/providers", s.mgmt.ListProviders)
+		mgmt.POST("/providers/:id/refresh", s.mgmt.RefreshProvider)
+		mgmt.POST("/providers/:id/sync", s.mgmt.SyncProviderModels)
+		mgmt.POST("/providers/:id/models/sync", s.mgmt.SyncProviderModels)
+		mgmt.GET("/providers/:id", s.mgmt.GetProvider)
+		mgmt.PATCH("/providers/:id", s.mgmt.PatchProvider)
+		mgmt.DELETE("/providers/:id", s.mgmt.DeleteProvider)
 
 		mgmt.GET("/anthropic-auth-url", s.mgmt.RequestAnthropicToken)
 		mgmt.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
