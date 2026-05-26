@@ -242,6 +242,10 @@ func NormalizeOAuthProvider(provider string) (string, error) {
 		return "gemini", nil
 	case "antigravity", "anti-gravity":
 		return "antigravity", nil
+	case "kiro":
+		return "kiro", nil
+	case "github", "copilot", "github-copilot":
+		return "github-copilot", nil
 	case "xai", "x-ai", "x.ai", "grok":
 		return "xai", nil
 	default:

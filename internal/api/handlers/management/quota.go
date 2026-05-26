@@ -31,6 +31,31 @@ func (h *Handler) GetQuota(c *gin.Context) {
 	c.JSON(http.StatusOK, quota.BuildQuotaView(service.Auths(), service.SupportsProvider))
 }
 
+func (h *Handler) GetCopilotQuota(c *gin.Context) {
+	h.getProviderQuota(c, "github-copilot")
+}
+
+func (h *Handler) GetKiroQuota(c *gin.Context) {
+	h.getProviderQuota(c, "kiro")
+}
+
+func (h *Handler) getProviderQuota(c *gin.Context, provider string) {
+	service := h.quotaService()
+	if service == nil {
+		c.JSON(http.StatusOK, quota.BuildQuotaView(nil, nil))
+		return
+	}
+	providerKey := quota.ProviderKeyForName(provider)
+	auths := service.Auths()
+	filtered := auths[:0]
+	for _, auth := range auths {
+		if auth != nil && quota.ProviderKey(auth) == providerKey {
+			filtered = append(filtered, auth)
+		}
+	}
+	c.JSON(http.StatusOK, quota.BuildQuotaView(filtered, service.SupportsProvider))
+}
+
 func (h *Handler) GetQuotaSummary(c *gin.Context) {
 	service := h.quotaService()
 	if service == nil {
