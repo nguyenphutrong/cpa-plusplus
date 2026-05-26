@@ -385,6 +385,7 @@ func (s *Server) setupRoutes() {
 		v1.GET("/models", s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers))
 		v1.POST("/chat/completions", openaiHandlers.ChatCompletions)
 		v1.POST("/completions", openaiHandlers.Completions)
+		v1.POST("/embeddings", openaiHandlers.Embeddings)
 		v1.POST("/images/generations", openaiHandlers.ImagesGenerations)
 		v1.POST("/images/edits", openaiHandlers.ImagesEdits)
 		v1.POST("/videos", openaiHandlers.VideosCreate)
@@ -400,12 +401,25 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Codex CLI direct route aliases (chatgpt_base_url compatible)
-	codexDirect := s.engine.Group("/backend-api/codex")
+	codexDirect := s.engine.Group("/codex")
 	codexDirect.Use(AuthMiddleware(s.accessManager))
 	{
+		codexDirect.GET("/models", s.codexModelsHandler(openaiHandlers))
+		codexDirect.POST("/chat/completions", openaiHandlers.ChatCompletions)
+		codexDirect.POST("/embeddings", openaiHandlers.Embeddings)
 		codexDirect.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
 		codexDirect.POST("/responses", openaiResponsesHandlers.Responses)
 		codexDirect.POST("/responses/compact", openaiResponsesHandlers.Compact)
+	}
+	backendCodexDirect := s.engine.Group("/backend-api/codex")
+	backendCodexDirect.Use(AuthMiddleware(s.accessManager))
+	{
+		backendCodexDirect.GET("/models", s.codexModelsHandler(openaiHandlers))
+		backendCodexDirect.POST("/chat/completions", openaiHandlers.ChatCompletions)
+		backendCodexDirect.POST("/embeddings", openaiHandlers.Embeddings)
+		backendCodexDirect.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
+		backendCodexDirect.POST("/responses", openaiResponsesHandlers.Responses)
+		backendCodexDirect.POST("/responses/compact", openaiResponsesHandlers.Compact)
 	}
 
 	// Gemini compatible API routes
@@ -900,6 +914,112 @@ func (s *Server) handleHomeCodexClientModels(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, openai.CodexClientModelsResponse(models))
+}
+
+func (s *Server) codexModelsHandler(openaiHandler *openai.OpenAIAPIHandler) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		merged := make([]map[string]any, 0)
+		seen := map[string]struct{}{}
+		appendModel := func(model map[string]any) {
+			slug, _ := model["slug"].(string)
+			slug = strings.TrimSpace(slug)
+			if slug == "" {
+				return
+			}
+			if _, ok := seen[slug]; ok {
+				return
+			}
+			seen[slug] = struct{}{}
+			merged = append(merged, model)
+		}
+
+		for _, model := range s.fetchCodexUpstreamModels(c.Request.Context()) {
+			appendModel(model)
+		}
+
+		localPayload := openai.CodexClientModelsResponse(openaiHandler.Models())
+		if localModels, ok := localPayload["models"].([]map[string]any); ok {
+			for _, model := range localModels {
+				appendModel(model)
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{"models": merged})
+	}
+}
+
+func (s *Server) fetchCodexUpstreamModels(ctx context.Context) []map[string]any {
+	if s == nil || s.handlers == nil || s.handlers.AuthManager == nil {
+		return nil
+	}
+	var selected *auth.Auth
+	for _, candidate := range s.handlers.AuthManager.List() {
+		if candidate == nil || !strings.EqualFold(strings.TrimSpace(candidate.Provider), "codex") || candidate.Disabled {
+			continue
+		}
+		apiKey, _ := codexModelFetchCredentials(candidate)
+		if apiKey == "" {
+			continue
+		}
+		selected = candidate
+		break
+	}
+	if selected == nil {
+		return nil
+	}
+
+	apiKey, baseURL := codexModelFetchCredentials(selected)
+	targetURL := "https://chatgpt.com/backend-api/codex/models"
+	if baseURL != "" {
+		root := strings.TrimRight(baseURL, "/")
+		root = strings.TrimSuffix(root, "/v1")
+		targetURL = root + "/models"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("User-Agent", "codex_cli_rs/0.118.0")
+	req.Header.Set("Originator", "codex_cli_rs")
+	util.ApplyCustomHeadersFromAttrs(req, selected.Attributes)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil
+	}
+	var payload struct {
+		Models []map[string]any `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil
+	}
+	return payload.Models
+}
+
+func codexModelFetchCredentials(auth *auth.Auth) (apiKey, baseURL string) {
+	if auth == nil {
+		return "", ""
+	}
+	if auth.Attributes != nil {
+		apiKey = strings.TrimSpace(auth.Attributes["api_key"])
+		baseURL = strings.TrimSpace(auth.Attributes["base_url"])
+	}
+	if apiKey == "" && auth.Metadata != nil {
+		if value, ok := auth.Metadata["access_token"].(string); ok {
+			apiKey = strings.TrimSpace(value)
+		}
+	}
+	if baseURL == "" && auth.Metadata != nil {
+		if value, ok := auth.Metadata["base_url"].(string); ok {
+			baseURL = strings.TrimSpace(value)
+		}
+	}
+	return apiKey, baseURL
 }
 
 func (s *Server) geminiModelsHandler(geminiHandler *gemini.GeminiAPIHandler) gin.HandlerFunc {

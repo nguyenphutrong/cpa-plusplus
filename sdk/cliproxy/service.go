@@ -317,6 +317,15 @@ func (s *Service) applyCoreAuthAddOrUpdate(ctx context.Context, auth *coreauth.A
 		auth = current
 	}
 
+	if refreshed := s.refreshLiveModelInventory(ctx, auth); refreshed != nil && refreshed != auth {
+		auth = refreshed
+		if updated, errUpdate := s.coreManager.Update(ctx, auth); errUpdate == nil && updated != nil {
+			auth = updated
+		} else if errUpdate != nil {
+			log.Warnf("failed to persist live model inventory for auth %s: %v", auth.ID, errUpdate)
+		}
+	}
+
 	// Register models after auth is updated in coreManager.
 	// This operation may block on network calls, but the auth configuration
 	// is already effective at this point.
@@ -1087,14 +1096,21 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 	}
 	var models []*ModelInfo
 	switch provider {
+	case "openai":
+		models = liveInventoryModelInfos(a, provider, "openai", "openai")
+		models = applyExcludedModels(models, excluded)
 	case "gemini":
-		models = registry.GetGeminiModels()
-		if entry := s.resolveConfigGeminiKey(a); entry != nil {
-			if len(entry.Models) > 0 {
-				models = buildGeminiConfigModels(entry)
-			}
-			if authKind == "apikey" {
-				excluded = entry.ExcludedModels
+		if live := liveInventoryModelInfos(a, provider, "google", "gemini"); len(live) > 0 {
+			models = live
+		} else {
+			models = registry.GetGeminiModels()
+			if entry := s.resolveConfigGeminiKey(a); entry != nil {
+				if len(entry.Models) > 0 {
+					models = buildGeminiConfigModels(entry)
+				}
+				if authKind == "apikey" {
+					excluded = entry.ExcludedModels
+				}
 			}
 		}
 		models = applyExcludedModels(models, excluded)
@@ -1131,28 +1147,32 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 		}
 		models = applyExcludedModels(models, excluded)
 	case "codex":
-		codexPlanType := ""
-		if a.Attributes != nil {
-			codexPlanType = strings.TrimSpace(a.Attributes["plan_type"])
-		}
-		switch strings.ToLower(codexPlanType) {
-		case "pro":
-			models = registry.GetCodexProModels()
-		case "plus":
-			models = registry.GetCodexPlusModels()
-		case "team", "business", "go":
-			models = registry.GetCodexTeamModels()
-		case "free":
-			models = registry.GetCodexFreeModels()
-		default:
-			models = registry.GetCodexProModels()
-		}
-		if entry := s.resolveConfigCodexKey(a); entry != nil {
-			if len(entry.Models) > 0 {
-				models = buildCodexConfigModels(entry)
+		if live := liveInventoryModelInfos(a, provider, "openai", "openai"); len(live) > 0 {
+			models = registry.WithCodexBuiltins(live)
+		} else {
+			codexPlanType := ""
+			if a.Attributes != nil {
+				codexPlanType = strings.TrimSpace(a.Attributes["plan_type"])
 			}
-			if authKind == "apikey" {
-				excluded = entry.ExcludedModels
+			switch strings.ToLower(codexPlanType) {
+			case "pro":
+				models = registry.GetCodexProModels()
+			case "plus":
+				models = registry.GetCodexPlusModels()
+			case "team", "business", "go":
+				models = registry.GetCodexTeamModels()
+			case "free":
+				models = registry.GetCodexFreeModels()
+			default:
+				models = registry.GetCodexProModels()
+			}
+			if entry := s.resolveConfigCodexKey(a); entry != nil {
+				if len(entry.Models) > 0 {
+					models = buildCodexConfigModels(entry)
+				}
+				if authKind == "apikey" {
+					excluded = entry.ExcludedModels
+				}
 			}
 		}
 		models = applyExcludedModels(models, excluded)
@@ -1208,7 +1228,10 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 				}
 				if strings.EqualFold(compat.Name, compatName) {
 					isCompatAuth = true
-					ms := buildOpenAICompatibilityConfigModels(compat)
+					ms := liveInventoryModelInfos(a, providerKey, compat.Name, "openai-compatibility")
+					if len(ms) == 0 {
+						ms = buildOpenAICompatibilityConfigModels(compat)
+					}
 					// Register and return
 					if len(ms) > 0 {
 						if providerKey == "" {
@@ -1257,6 +1280,14 @@ func (s *Service) refreshModelRegistrationForAuth(current *coreauth.Auth) bool {
 	if !current.Disabled {
 		s.ensureExecutorsForAuth(current)
 	}
+	if refreshed := s.refreshLiveModelInventory(context.Background(), current); refreshed != nil && refreshed != current {
+		current = refreshed
+		if updated, errUpdate := s.coreManager.Update(context.Background(), current); errUpdate == nil && updated != nil {
+			current = updated
+		} else if errUpdate != nil {
+			log.Warnf("failed to persist live model inventory for auth %s during model refresh: %v", current.ID, errUpdate)
+		}
+	}
 	s.registerModelsForAuth(current)
 	s.coreManager.ReconcileRegistryModelStates(context.Background(), current.ID)
 
@@ -1271,6 +1302,14 @@ func (s *Service) refreshModelRegistrationForAuth(current *coreauth.Auth) bool {
 	// stale model registrations behind. This may duplicate registration work when
 	// no auth fields changed, but keeps the refresh path simple and correct.
 	s.ensureExecutorsForAuth(latest)
+	if refreshed := s.refreshLiveModelInventory(context.Background(), latest); refreshed != nil && refreshed != latest {
+		latest = refreshed
+		if updated, errUpdate := s.coreManager.Update(context.Background(), latest); errUpdate == nil && updated != nil {
+			latest = updated
+		} else if errUpdate != nil {
+			log.Warnf("failed to persist live model inventory for auth %s during model refresh: %v", latest.ID, errUpdate)
+		}
+	}
 	s.registerModelsForAuth(latest)
 	s.coreManager.ReconcileRegistryModelStates(context.Background(), latest.ID)
 	s.coreManager.RefreshSchedulerEntry(current.ID)

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -374,6 +375,151 @@ func TestModelsWithClientVersionReturnsCodexCatalog(t *testing.T) {
 		if !found {
 			t.Fatalf("expected hidden model %s in codex catalog", slug)
 		}
+	}
+}
+
+func TestCodexModelsMergesUpstreamAndLocalModels(t *testing.T) {
+	modelRegistry := registry.GetGlobalRegistry()
+	clientID := "test-codex-models-local"
+	modelRegistry.RegisterClient(clientID, "openai", []*registry.ModelInfo{
+		{ID: "openai/gpt-4.1", Object: "model", OwnedBy: "openai", DisplayName: "Local duplicate"},
+		{ID: "local-codex-surface-model", Object: "model", OwnedBy: "test", DisplayName: "Local Codex Surface"},
+	})
+	t.Cleanup(func() {
+		modelRegistry.UnregisterClient(clientID)
+	})
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/backend-api/codex/models" {
+			t.Fatalf("upstream path = %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer codex-key" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-5.3-codex","display_name":"GPT-5.3 Codex"},{"slug":"openai/gpt-4.1","display_name":"Upstream duplicate"}]}`))
+	}))
+	defer upstream.Close()
+
+	server := newTestServer(t)
+	if _, err := server.handlers.AuthManager.Register(t.Context(), &auth.Auth{
+		ID:       "codex-upstream-auth",
+		Provider: "codex",
+		Attributes: map[string]string{
+			"api_key":  "codex-key",
+			"base_url": upstream.URL + "/backend-api/codex",
+		},
+	}); err != nil {
+		t.Fatalf("register codex auth: %v", err)
+	}
+
+	for _, path := range []string{"/codex/models", "/backend-api/codex/models"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer test-key")
+		rr := httptest.NewRecorder()
+		server.engine.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status = %d body=%s", path, rr.Code, rr.Body.String())
+		}
+		var payload struct {
+			Models []map[string]any `json:"models"`
+			Object string           `json:"object"`
+			Data   []any            `json:"data"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("%s decode response: %v body=%s", path, err, rr.Body.String())
+		}
+		if payload.Object != "" || payload.Data != nil {
+			t.Fatalf("%s returned OpenAI list shape: object=%q data=%v", path, payload.Object, payload.Data)
+		}
+		seen := map[string]map[string]any{}
+		for _, model := range payload.Models {
+			slug, _ := model["slug"].(string)
+			if slug != "" {
+				seen[slug] = model
+			}
+		}
+		if _, ok := seen["gpt-5.3-codex"]; !ok {
+			t.Fatalf("%s missing upstream codex model in %#v", path, seen)
+		}
+		if got, _ := seen["openai/gpt-4.1"]["display_name"].(string); got != "Upstream duplicate" {
+			t.Fatalf("%s duplicate model did not prefer upstream, display_name=%q", path, got)
+		}
+		if _, ok := seen["local-codex-surface-model"]; !ok {
+			t.Fatalf("%s missing local registry model in %#v", path, seen)
+		}
+	}
+}
+
+func TestCodexAliasesUseExistingHandlers(t *testing.T) {
+	server := newTestServer(t)
+
+	testCases := []struct {
+		name   string
+		path   string
+		method string
+		body   []byte
+	}{
+		{
+			name:   "codex chat",
+			path:   "/codex/chat/completions",
+			method: http.MethodPost,
+			body:   []byte(`{"model":"missing-model","messages":[{"role":"user","content":"hi"}]}`),
+		},
+		{
+			name:   "backend codex chat",
+			path:   "/backend-api/codex/chat/completions",
+			method: http.MethodPost,
+			body:   []byte(`{"model":"missing-model","messages":[{"role":"user","content":"hi"}]}`),
+		},
+		{
+			name:   "codex embeddings",
+			path:   "/codex/embeddings",
+			method: http.MethodPost,
+			body:   []byte(`{"model":"missing-model","input":"hi"}`),
+		},
+		{
+			name:   "backend codex embeddings",
+			path:   "/backend-api/codex/embeddings",
+			method: http.MethodPost,
+			body:   []byte(`{"model":"missing-model","input":"hi"}`),
+		},
+		{
+			name:   "codex responses",
+			path:   "/codex/responses",
+			method: http.MethodPost,
+			body:   []byte(`{"model":"missing-model","input":[]}`),
+		},
+		{
+			name:   "backend codex responses",
+			path:   "/backend-api/codex/responses",
+			method: http.MethodPost,
+			body:   []byte(`{"model":"missing-model","input":[]}`),
+		},
+		{
+			name:   "codex responses compact",
+			path:   "/codex/responses/compact",
+			method: http.MethodPost,
+			body:   []byte(`{"model":"missing-model","input":"hello"}`),
+		},
+		{
+			name:   "backend codex responses compact",
+			path:   "/backend-api/codex/responses/compact",
+			method: http.MethodPost,
+			body:   []byte(`{"model":"missing-model","input":"hello"}`),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader(tc.body))
+			req.Header.Set("Authorization", "Bearer test-key")
+			rr := httptest.NewRecorder()
+			server.engine.ServeHTTP(rr, req)
+			if rr.Code == http.StatusNotFound {
+				t.Fatalf("%s returned 404 body=%s", tc.path, rr.Body.String())
+			}
+		})
 	}
 }
 

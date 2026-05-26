@@ -62,6 +62,46 @@ func TestOpenAICompatExecutorCompactPassthrough(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatExecutorEmbeddingsPassthrough(t *testing.T) {
+	var gotPath string
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		gotBody = body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","embedding":[0.1],"index":0}],"model":"text-embedding-3-small"}`))
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL + "/v1",
+		"api_key":  "test",
+	}}
+	payload := []byte(`{"model":"prefixed/text-embedding-3-small","input":"hello"}`)
+	resp, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "text-embedding-3-small",
+		Payload: payload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai"),
+		Alt:          "embeddings",
+		Stream:       false,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if gotPath != "/v1/embeddings" {
+		t.Fatalf("path = %q, want %q", gotPath, "/v1/embeddings")
+	}
+	if got := gjson.GetBytes(gotBody, "model").String(); got != "text-embedding-3-small" {
+		t.Fatalf("model = %q, want text-embedding-3-small", got)
+	}
+	if string(resp.Payload) == "" {
+		t.Fatal("expected response payload")
+	}
+}
+
 func TestOpenAICompatExecutorPayloadOverrideWinsOverThinkingSuffix(t *testing.T) {
 	var gotBody []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

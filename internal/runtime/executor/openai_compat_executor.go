@@ -104,26 +104,42 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	if opts.Alt == "responses/compact" {
 		to = sdktranslator.FromString("openai-response")
 		endpoint = "/responses/compact"
+	} else if opts.Alt == "embeddings" {
+		endpoint = "/embeddings"
 	}
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
 		originalPayloadSource = opts.OriginalRequest
 	}
-	originalPayload := originalPayloadSource
-	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, opts.Stream)
-	translated := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, opts.Stream)
 
-	translated, err = thinking.ApplyThinking(translated, req.Model, from.String(), to.String(), e.Identifier())
-	if err != nil {
-		return resp, err
-	}
-
-	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
-	requestPath := helps.PayloadRequestPath(opts)
-	translated = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", translated, originalTranslated, requestedModel, requestPath, opts.Headers)
-	if opts.Alt == "responses/compact" {
-		if updated, errDelete := sjson.DeleteBytes(translated, "stream"); errDelete == nil {
+	var originalTranslated []byte
+	var translated []byte
+	if opts.Alt == "embeddings" {
+		originalTranslated = originalPayloadSource
+		translated = req.Payload
+		if len(translated) == 0 {
+			translated = originalPayloadSource
+		}
+		if updated, errSet := sjson.SetBytes(translated, "model", baseModel); errSet == nil {
 			translated = updated
+		}
+	} else {
+		originalPayload := originalPayloadSource
+		originalTranslated = sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, opts.Stream)
+		translated = sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, opts.Stream)
+
+		translated, err = thinking.ApplyThinking(translated, req.Model, from.String(), to.String(), e.Identifier())
+		if err != nil {
+			return resp, err
+		}
+
+		requestedModel := helps.PayloadRequestedModel(opts, req.Model)
+		requestPath := helps.PayloadRequestPath(opts)
+		translated = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", translated, originalTranslated, requestedModel, requestPath, opts.Headers)
+		if opts.Alt == "responses/compact" {
+			if updated, errDelete := sjson.DeleteBytes(translated, "stream"); errDelete == nil {
+				translated = updated
+			}
 		}
 	}
 

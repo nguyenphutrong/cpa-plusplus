@@ -89,6 +89,8 @@ type Auth struct {
 	NextRetryAfter time.Time `json:"next_retry_after"`
 	// ModelStates tracks per-model runtime availability data.
 	ModelStates map[string]*ModelState `json:"model_states,omitempty"`
+	// ModelInventory stores the latest live provider model listing for this auth.
+	ModelInventory *LiveModelInventory `json:"model_inventory,omitempty"`
 
 	// Runtime carries non-serialisable data used during execution (in-memory only).
 	Runtime any `json:"-"`
@@ -149,6 +151,20 @@ type ModelState struct {
 	Quota QuotaState `json:"quota"`
 	// UpdatedAt tracks the last update timestamp for this model state.
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type LiveModelEntry struct {
+	ID      string         `json:"id"`
+	OwnedBy string         `json:"owned_by,omitempty"`
+	Raw     map[string]any `json:"raw,omitempty"`
+}
+
+type LiveModelInventory struct {
+	Provider        string           `json:"provider,omitempty"`
+	AccountIdentity string           `json:"account_identity,omitempty"`
+	Models          []LiveModelEntry `json:"models,omitempty"`
+	FetchedAt       time.Time        `json:"fetched_at,omitempty"`
+	Warnings        []string         `json:"warnings,omitempty"`
 }
 
 func recentRequestBucketID(now time.Time) int64 {
@@ -238,6 +254,31 @@ func (a *Auth) Clone() *Auth {
 		for key, state := range a.ModelStates {
 			copyAuth.ModelStates[key] = state.Clone()
 		}
+	}
+	if a.ModelInventory != nil {
+		copyInventory := &LiveModelInventory{
+			Provider:        a.ModelInventory.Provider,
+			AccountIdentity: a.ModelInventory.AccountIdentity,
+			FetchedAt:       a.ModelInventory.FetchedAt,
+			Warnings:        append([]string(nil), a.ModelInventory.Warnings...),
+		}
+		if len(a.ModelInventory.Models) > 0 {
+			copyInventory.Models = make([]LiveModelEntry, 0, len(a.ModelInventory.Models))
+			for _, model := range a.ModelInventory.Models {
+				entry := LiveModelEntry{
+					ID:      model.ID,
+					OwnedBy: model.OwnedBy,
+				}
+				if len(model.Raw) > 0 {
+					entry.Raw = make(map[string]any, len(model.Raw))
+					for key, value := range model.Raw {
+						entry.Raw[key] = value
+					}
+				}
+				copyInventory.Models = append(copyInventory.Models, entry)
+			}
+		}
+		copyAuth.ModelInventory = copyInventory
 	}
 	copyAuth.Runtime = a.Runtime
 	return &copyAuth
