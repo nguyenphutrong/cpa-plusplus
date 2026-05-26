@@ -67,6 +67,17 @@ func main() {
 	var antigravityLogin bool
 	var kimiLogin bool
 	var xaiLogin bool
+	var githubCopilotLogin bool
+	var kiroLogin bool
+	var kiroAWSLogin bool
+	var kiroAWSAuthCode bool
+	var kiroImport string
+	var kiroIDCLogin bool
+	var kiroIDCStartURL string
+	var kiroIDCRegion string
+	var kiroIDCFlow string
+	var incognito bool
+	var noIncognito bool
 	var projectID string
 	var vertexImport string
 	var vertexImportPrefix string
@@ -88,6 +99,17 @@ func main() {
 	flag.BoolVar(&antigravityLogin, "antigravity-login", false, "Login to Antigravity using OAuth")
 	flag.BoolVar(&kimiLogin, "kimi-login", false, "Login to Kimi using OAuth")
 	flag.BoolVar(&xaiLogin, "xai-login", false, "Login to xAI using OAuth")
+	flag.BoolVar(&githubCopilotLogin, "github-copilot-login", false, "Login to GitHub Copilot using device flow")
+	flag.BoolVar(&kiroLogin, "kiro-login", false, "Login to Kiro using AWS Builder ID device flow")
+	flag.BoolVar(&kiroAWSLogin, "kiro-aws-login", false, "Login to Kiro using AWS Builder ID")
+	flag.BoolVar(&kiroAWSAuthCode, "kiro-aws-authcode", false, "Login to Kiro using AWS Builder ID auth-code flow")
+	flag.StringVar(&kiroImport, "kiro-import", "", "Import Kiro token JSON file")
+	flag.BoolVar(&kiroIDCLogin, "kiro-idc-login", false, "Login to Kiro using AWS IDC")
+	flag.StringVar(&kiroIDCStartURL, "kiro-idc-start-url", "", "AWS IDC start URL for Kiro login")
+	flag.StringVar(&kiroIDCRegion, "kiro-idc-region", "", "AWS IDC region for Kiro login")
+	flag.StringVar(&kiroIDCFlow, "kiro-idc-flow", "", "AWS IDC flow for Kiro login")
+	flag.BoolVar(&incognito, "incognito", true, "Use incognito/private browser mode for Kiro login")
+	flag.BoolVar(&noIncognito, "no-incognito", false, "Disable incognito/private browser mode for Kiro login")
 	flag.StringVar(&projectID, "project_id", "", "Project ID (Gemini only, not required)")
 	flag.StringVar(&configPath, "config", DefaultConfigPath, "Configure File Path")
 	flag.StringVar(&vertexImport, "vertex-import", "", "Import Vertex service account key JSON file")
@@ -550,6 +572,27 @@ func main() {
 		cmd.DoKimiLogin(cfg, options)
 	} else if xaiLogin {
 		cmd.DoXAILogin(cfg, options)
+	} else if githubCopilotLogin {
+		cmd.DoGitHubCopilotLogin(cfg, options)
+	} else if kiroLogin || kiroAWSLogin || kiroAWSAuthCode || kiroIDCLogin || kiroImport != "" {
+		mode := "device"
+		if kiroAWSLogin {
+			mode = "aws"
+		}
+		if kiroAWSAuthCode {
+			mode = "aws-authcode"
+		}
+		if kiroIDCLogin {
+			mode = "idc"
+		}
+		cmd.DoKiroLogin(cfg, options, cmd.KiroLoginOptions{
+			Mode:      mode,
+			Import:    kiroImport,
+			StartURL:  kiroIDCStartURL,
+			Region:    kiroIDCRegion,
+			Flow:      kiroIDCFlow,
+			Incognito: incognito && !noIncognito,
+		})
 	} else {
 		// In cloud deploy mode without config file, just wait for shutdown signals
 		if isCloudDeploy && !configFileExists {
