@@ -1,0 +1,1711 @@
+openapi: 3.1.0
+info:
+  title: cpa++ Management API
+  version: 0.1.0
+  description: |
+    Management API for configuring cpa++, managing credentials, starting OAuth
+    flows, refreshing quota state, and inspecting operational data.
+
+    All `/v0/management` endpoints require the management bearer token. Legacy
+    OAuth and provider-specific quota routes are documented for compatibility
+    and marked deprecated where a canonical replacement exists.
+servers:
+  - url: http://localhost:{port}/v0/management
+    description: Local cpa++ management server
+    variables:
+      port:
+        default: "8317"
+security:
+  - bearerAuth: []
+tags:
+  - name: Config
+  - name: Quota
+  - name: Providers
+  - name: Provider OAuth
+  - name: Auth Files
+  - name: API Keys
+  - name: Logs
+  - name: Models
+  - name: OAuth Legacy
+  - name: AMP
+  - name: Usage
+  - name: Public OAuth
+
+paths:
+  /config:
+    get:
+      tags: [Config]
+      summary: Get active management configuration
+      responses:
+        "200":
+          description: Current config object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Config"
+    put:
+      tags: [Config]
+      summary: Replace active configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Config"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /config.yaml:
+    get:
+      tags: [Config]
+      summary: Download config as YAML
+      responses:
+        "200":
+          description: YAML config
+          content:
+            application/x-yaml:
+              schema:
+                type: string
+    put:
+      tags: [Config]
+      summary: Replace config from YAML
+      requestBody:
+        required: true
+        content:
+          application/x-yaml:
+            schema:
+              type: string
+          text/yaml:
+            schema:
+              type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /latest-version:
+    get:
+      tags: [Config]
+      summary: Get latest known release version
+      responses:
+        "200":
+          description: Version payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /debug:
+    get:
+      tags: [Config]
+      summary: Get debug mode
+      responses:
+        "200":
+          $ref: "#/components/responses/BooleanSetting"
+    put:
+      tags: [Config]
+      summary: Set debug mode
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Config]
+      summary: Patch debug mode
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /logging-to-file:
+    get:
+      tags: [Config]
+      summary: Get file logging setting
+      responses:
+        "200":
+          $ref: "#/components/responses/BooleanSetting"
+    put:
+      tags: [Config]
+      summary: Set file logging
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Config]
+      summary: Patch file logging
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /logs-max-total-size-mb:
+    get:
+      tags: [Config]
+      summary: Get maximum log storage size in MB
+      responses:
+        "200":
+          $ref: "#/components/responses/IntegerSetting"
+    put:
+      tags: [Config]
+      summary: Set maximum log storage size in MB
+      requestBody:
+        $ref: "#/components/requestBodies/IntegerSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Config]
+      summary: Patch maximum log storage size in MB
+      requestBody:
+        $ref: "#/components/requestBodies/IntegerSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /error-logs-max-files:
+    get:
+      tags: [Config]
+      summary: Get maximum number of error log files
+      responses:
+        "200":
+          $ref: "#/components/responses/IntegerSetting"
+    put:
+      tags: [Config]
+      summary: Set maximum number of error log files
+      requestBody:
+        $ref: "#/components/requestBodies/IntegerSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Config]
+      summary: Patch maximum number of error log files
+      requestBody:
+        $ref: "#/components/requestBodies/IntegerSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /usage-statistics-enabled:
+    get:
+      tags: [Config]
+      summary: Get usage statistics setting
+      responses:
+        "200":
+          $ref: "#/components/responses/BooleanSetting"
+    put:
+      tags: [Config]
+      summary: Set usage statistics setting
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Config]
+      summary: Patch usage statistics setting
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /proxy-url:
+    get:
+      tags: [Config]
+      summary: Get global proxy URL
+      responses:
+        "200":
+          $ref: "#/components/responses/StringSetting"
+    put:
+      tags: [Config]
+      summary: Set global proxy URL
+      requestBody:
+        $ref: "#/components/requestBodies/StringSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Config]
+      summary: Patch global proxy URL
+      requestBody:
+        $ref: "#/components/requestBodies/StringSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    delete:
+      tags: [Config]
+      summary: Clear global proxy URL
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /api-call:
+    post:
+      tags: [Config]
+      summary: Execute a management API call through the server helper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Upstream response payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /quota-exceeded/switch-project:
+    get:
+      tags: [Quota]
+      summary: Get switch-project-on-quota setting
+      responses:
+        "200":
+          $ref: "#/components/responses/BooleanSetting"
+    put:
+      tags: [Quota]
+      summary: Set switch-project-on-quota setting
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Quota]
+      summary: Patch switch-project-on-quota setting
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /quota-exceeded/switch-preview-model:
+    get:
+      tags: [Quota]
+      summary: Get switch-preview-model-on-quota setting
+      responses:
+        "200":
+          $ref: "#/components/responses/BooleanSetting"
+    put:
+      tags: [Quota]
+      summary: Set switch-preview-model-on-quota setting
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Quota]
+      summary: Patch switch-preview-model-on-quota setting
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /quota:
+    get:
+      tags: [Quota]
+      summary: Get unified quota view
+      responses:
+        "200":
+          description: Quota view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaView"
+  /quota/summary:
+    get:
+      tags: [Quota]
+      summary: Get quota summary
+      responses:
+        "200":
+          description: Quota summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaSummary"
+  /quota/providers/{provider}:
+    get:
+      tags: [Quota]
+      summary: Get quota view filtered by provider
+      parameters:
+        - $ref: "#/components/parameters/ProviderPath"
+      responses:
+        "200":
+          description: Provider-filtered quota view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaView"
+  /quota/refresh:
+    post:
+      tags: [Quota]
+      summary: Refresh quota for all supported credentials
+      responses:
+        "200":
+          description: Refreshed quota view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaView"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /quota/refresh/{provider}/{authID}:
+    post:
+      tags: [Quota]
+      summary: Refresh quota for one credential
+      parameters:
+        - $ref: "#/components/parameters/ProviderPath"
+        - name: authID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Refreshed quota view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /copilot-quota:
+    get:
+      tags: [Quota]
+      summary: Get GitHub Copilot quota view
+      deprecated: true
+      description: Deprecated. Use `GET /quota/providers/github-copilot`.
+      responses:
+        "200":
+          description: GitHub Copilot quota view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaView"
+  /kiro-quota:
+    get:
+      tags: [Quota]
+      summary: Get Kiro quota view
+      deprecated: true
+      description: Deprecated. Use `GET /quota/providers/kiro`.
+      responses:
+        "200":
+          description: Kiro quota view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaView"
+
+  /providers/oauth/start:
+    post:
+      tags: [Provider OAuth]
+      summary: Start provider OAuth or device-code login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderOAuthStartRequest"
+      responses:
+        "200":
+          description: OAuth session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderOAuthSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /providers/oauth/sessions/{session_id}:
+    get:
+      tags: [Provider OAuth]
+      summary: Get provider OAuth session status
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200":
+          description: OAuth session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderOAuthSession"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Provider OAuth]
+      summary: Cancel provider OAuth session
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200":
+          description: Cancelled OAuth session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderOAuthSession"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /providers/oauth/callback:
+    post:
+      tags: [Provider OAuth]
+      summary: Complete a callback-based provider OAuth session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderOAuthCallbackRequest"
+      responses:
+        "200":
+          description: OAuth session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderOAuthSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /providers:
+    get:
+      tags: [Providers]
+      summary: List provider credentials
+      responses:
+        "200":
+          description: Provider credential list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProviderResponse"
+  /providers/{id}:
+    get:
+      tags: [Providers]
+      summary: Get provider credential
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      responses:
+        "200":
+          description: Provider credential
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Providers]
+      summary: Patch provider credential metadata
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderPatchRequest"
+      responses:
+        "200":
+          description: Updated provider credential
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Providers]
+      summary: Delete provider credential
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /providers/{id}/refresh:
+    post:
+      tags: [Providers]
+      summary: Refresh provider credential token
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      responses:
+        "200":
+          description: Refreshed provider credential
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /providers/{id}/sync:
+    post:
+      tags: [Providers]
+      summary: Sync provider metadata
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      responses:
+        "200":
+          description: Provider sync summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSyncSummary"
+  /providers/{id}/models/sync:
+    post:
+      tags: [Providers, Models]
+      summary: Sync provider model inventory
+      parameters:
+        - $ref: "#/components/parameters/ProviderID"
+      responses:
+        "200":
+          description: Provider model sync summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSyncSummary"
+
+  /auth-files:
+    get:
+      tags: [Auth Files]
+      summary: List low-level auth files
+      responses:
+        "200":
+          description: Auth file list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuthFileEntry"
+    post:
+      tags: [Auth Files]
+      summary: Upload one or more auth files
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    delete:
+      tags: [Auth Files]
+      summary: Delete auth files
+      parameters:
+        - name: name
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: all
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /auth-files/models:
+    get:
+      tags: [Auth Files, Models]
+      summary: List models associated with auth files
+      responses:
+        "200":
+          description: Auth file model list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /auth-files/download:
+    get:
+      tags: [Auth Files]
+      summary: Download an auth file
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Auth file bytes
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /auth-files/status:
+    patch:
+      tags: [Auth Files]
+      summary: Enable or disable an auth file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, disabled]
+              properties:
+                name:
+                  type: string
+                disabled:
+                  type: boolean
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /auth-files/fields:
+    patch:
+      tags: [Auth Files]
+      summary: Patch editable auth file fields
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthFilePatchRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api-keys:
+    get:
+      tags: [API Keys]
+      summary: List configured API keys
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+    put:
+      tags: [API Keys]
+      summary: Replace configured API keys
+      requestBody:
+        $ref: "#/components/requestBodies/DynamicObject"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [API Keys]
+      summary: Patch configured API keys
+      requestBody:
+        $ref: "#/components/requestBodies/DynamicObject"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    delete:
+      tags: [API Keys]
+      summary: Delete configured API keys
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /api-key-usage:
+    get:
+      tags: [API Keys]
+      summary: Get API key usage
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+
+  /gemini-api-key:
+    $ref: "#/components/pathItems/KeyList"
+  /claude-api-key:
+    $ref: "#/components/pathItems/KeyList"
+  /codex-api-key:
+    $ref: "#/components/pathItems/KeyList"
+  /vertex-api-key:
+    $ref: "#/components/pathItems/KeyList"
+  /openai-compatibility:
+    $ref: "#/components/pathItems/KeyList"
+
+  /logs:
+    get:
+      tags: [Logs]
+      summary: List server logs
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+    delete:
+      tags: [Logs]
+      summary: Delete logs
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /request-error-logs:
+    get:
+      tags: [Logs]
+      summary: List request error logs
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+  /request-error-logs/{name}:
+    get:
+      tags: [Logs]
+      summary: Download a request error log
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Log file
+          content:
+            text/plain:
+              schema:
+                type: string
+  /request-log-by-id/{id}:
+    get:
+      tags: [Logs]
+      summary: Get request log by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+  /request-log:
+    get:
+      tags: [Logs]
+      summary: Get request logging config
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+    put:
+      tags: [Logs]
+      summary: Set request logging config
+      requestBody:
+        $ref: "#/components/requestBodies/DynamicObject"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Logs]
+      summary: Patch request logging config
+      requestBody:
+        $ref: "#/components/requestBodies/DynamicObject"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+  /usage-queue:
+    get:
+      tags: [Usage]
+      summary: Pop queued usage events
+      parameters:
+        - name: count
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+
+  /ws-auth:
+    get:
+      tags: [Config]
+      summary: Get websocket auth setting
+      responses:
+        "200":
+          $ref: "#/components/responses/BooleanSetting"
+    put:
+      tags: [Config]
+      summary: Set websocket auth setting
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Config]
+      summary: Patch websocket auth setting
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+
+  /ampcode:
+    get:
+      tags: [AMP]
+      summary: Get AMP configuration
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+  /ampcode/upstream-url:
+    $ref: "#/components/pathItems/StringConfig"
+  /ampcode/upstream-api-key:
+    $ref: "#/components/pathItems/StringConfig"
+  /ampcode/restrict-management-to-localhost:
+    $ref: "#/components/pathItems/BooleanConfig"
+  /ampcode/model-mappings:
+    $ref: "#/components/pathItems/DynamicConfigWithDelete"
+  /ampcode/force-model-mappings:
+    $ref: "#/components/pathItems/DynamicConfig"
+  /ampcode/upstream-api-keys:
+    $ref: "#/components/pathItems/DynamicConfigWithDelete"
+
+  /request-retry:
+    $ref: "#/components/pathItems/BooleanConfig"
+  /max-retry-interval:
+    $ref: "#/components/pathItems/IntegerConfig"
+  /force-model-prefix:
+    $ref: "#/components/pathItems/BooleanConfig"
+  /routing/strategy:
+    get:
+      tags: [Config]
+      summary: Get routing strategy
+      responses:
+        "200":
+          $ref: "#/components/responses/StringSetting"
+    put:
+      tags: [Config]
+      summary: Set routing strategy
+      requestBody:
+        $ref: "#/components/requestBodies/StringSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+    patch:
+      tags: [Config]
+      summary: Patch routing strategy
+      requestBody:
+        $ref: "#/components/requestBodies/StringSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+
+  /oauth-excluded-models:
+    $ref: "#/components/pathItems/DynamicConfigWithDelete"
+  /oauth-model-alias:
+    $ref: "#/components/pathItems/DynamicConfigWithDelete"
+  /model-definitions/{channel}:
+    get:
+      tags: [Models]
+      summary: Get static model definitions
+      parameters:
+        - name: channel
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [stable, runtime, source]
+      responses:
+        "200":
+          description: Model definitions
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /vertex/import:
+    post:
+      tags: [Auth Files]
+      summary: Import Vertex credential
+      requestBody:
+        $ref: "#/components/requestBodies/DynamicObject"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+
+  /anthropic-auth-url:
+    $ref: "#/components/pathItems/LegacyOAuthStart"
+  /codex-auth-url:
+    $ref: "#/components/pathItems/LegacyOAuthStart"
+  /gemini-cli-auth-url:
+    $ref: "#/components/pathItems/LegacyOAuthStart"
+  /github-copilot-auth-url:
+    $ref: "#/components/pathItems/LegacyOAuthStart"
+  /kiro-auth-url:
+    $ref: "#/components/pathItems/LegacyOAuthStart"
+  /antigravity-auth-url:
+    $ref: "#/components/pathItems/LegacyOAuthStart"
+  /kimi-auth-url:
+    $ref: "#/components/pathItems/LegacyOAuthStart"
+  /xai-auth-url:
+    $ref: "#/components/pathItems/LegacyOAuthStart"
+  /oauth-callback:
+    post:
+      tags: [OAuth Legacy]
+      summary: Submit legacy OAuth callback URL
+      deprecated: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  $ref: "#/components/schemas/ProviderID"
+                redirect_url:
+                  type: string
+                state:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /get-auth-status:
+    get:
+      tags: [OAuth Legacy]
+      summary: Get legacy OAuth status by state
+      deprecated: true
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Legacy auth status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, wait, error]
+                  error:
+                    type: string
+
+  /v0/oauth/callback/{provider}:
+    servers:
+      - url: http://localhost:{port}
+        variables:
+          port:
+            default: "8317"
+    get:
+      tags: [Public OAuth]
+      summary: Public OAuth callback alias
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ProviderPath"
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          schema:
+            type: string
+        - name: error_description
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Browser-facing callback completion page
+          content:
+            text/html:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Management password/API token in the `Authorization` header.
+  parameters:
+    ProviderPath:
+      name: provider
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ProviderID"
+    ProviderID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    SessionID:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  requestBodies:
+    BooleanSetting:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    IntegerSetting:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    StringSetting:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    DynamicObject:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+
+  responses:
+    StatusOK:
+      description: Operation succeeded
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/StatusResponse"
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Conflict or unsupported operation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    BadGateway:
+      description: Upstream/provider failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ServiceUnavailable:
+      description: Management service unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    BooleanSetting:
+      description: Boolean setting object
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties:
+              type: boolean
+    IntegerSetting:
+      description: Integer setting object
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties:
+              type: integer
+    StringSetting:
+      description: String setting object
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties:
+              type: string
+    DynamicObject:
+      description: Dynamic management payload
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+
+  pathItems:
+    BooleanConfig:
+      get:
+        tags: [Config]
+        summary: Get boolean setting
+        responses:
+          "200":
+            $ref: "#/components/responses/BooleanSetting"
+      put:
+        tags: [Config]
+        summary: Set boolean setting
+        requestBody:
+          $ref: "#/components/requestBodies/BooleanSetting"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+      patch:
+        tags: [Config]
+        summary: Patch boolean setting
+        requestBody:
+          $ref: "#/components/requestBodies/BooleanSetting"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+    IntegerConfig:
+      get:
+        tags: [Config]
+        summary: Get integer setting
+        responses:
+          "200":
+            $ref: "#/components/responses/IntegerSetting"
+      put:
+        tags: [Config]
+        summary: Set integer setting
+        requestBody:
+          $ref: "#/components/requestBodies/IntegerSetting"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+      patch:
+        tags: [Config]
+        summary: Patch integer setting
+        requestBody:
+          $ref: "#/components/requestBodies/IntegerSetting"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+    StringConfig:
+      get:
+        tags: [Config]
+        summary: Get string setting
+        responses:
+          "200":
+            $ref: "#/components/responses/StringSetting"
+      put:
+        tags: [Config]
+        summary: Set string setting
+        requestBody:
+          $ref: "#/components/requestBodies/StringSetting"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+      patch:
+        tags: [Config]
+        summary: Patch string setting
+        requestBody:
+          $ref: "#/components/requestBodies/StringSetting"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+      delete:
+        tags: [Config]
+        summary: Clear string setting
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+    DynamicConfig:
+      get:
+        tags: [Config]
+        summary: Get dynamic setting
+        responses:
+          "200":
+            $ref: "#/components/responses/DynamicObject"
+      put:
+        tags: [Config]
+        summary: Set dynamic setting
+        requestBody:
+          $ref: "#/components/requestBodies/DynamicObject"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+      patch:
+        tags: [Config]
+        summary: Patch dynamic setting
+        requestBody:
+          $ref: "#/components/requestBodies/DynamicObject"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+    DynamicConfigWithDelete:
+      get:
+        tags: [Config]
+        summary: Get dynamic setting
+        responses:
+          "200":
+            $ref: "#/components/responses/DynamicObject"
+      put:
+        tags: [Config]
+        summary: Set dynamic setting
+        requestBody:
+          $ref: "#/components/requestBodies/DynamicObject"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+      patch:
+        tags: [Config]
+        summary: Patch dynamic setting
+        requestBody:
+          $ref: "#/components/requestBodies/DynamicObject"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+      delete:
+        tags: [Config]
+        summary: Delete dynamic setting
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+    KeyList:
+      get:
+        tags: [API Keys]
+        summary: Get provider key list
+        responses:
+          "200":
+            $ref: "#/components/responses/DynamicObject"
+      put:
+        tags: [API Keys]
+        summary: Replace provider key list
+        requestBody:
+          $ref: "#/components/requestBodies/DynamicObject"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+      patch:
+        tags: [API Keys]
+        summary: Patch provider key list
+        requestBody:
+          $ref: "#/components/requestBodies/DynamicObject"
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+      delete:
+        tags: [API Keys]
+        summary: Delete provider key
+        responses:
+          "200":
+            $ref: "#/components/responses/StatusOK"
+    LegacyOAuthStart:
+      get:
+        tags: [OAuth Legacy]
+        summary: Start legacy OAuth URL flow
+        deprecated: true
+        description: Deprecated. Use `POST /providers/oauth/start`.
+        parameters:
+          - name: is_webui
+            in: query
+            required: false
+            schema:
+              type: boolean
+          - name: region
+            in: query
+            required: false
+            schema:
+              type: string
+        responses:
+          "200":
+            description: Legacy OAuth start payload
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    status:
+                      type: string
+                      example: ok
+                    url:
+                      type: string
+                    state:
+                      type: string
+                    session_id:
+                      type: string
+                    user_code:
+                      type: string
+                    verification_uri:
+                      type: string
+                    expires_in:
+                      type: integer
+                    interval:
+                      type: integer
+
+  schemas:
+    ProviderID:
+      type: string
+      enum:
+        - anthropic
+        - antigravity
+        - codex
+        - gemini
+        - github-copilot
+        - kiro
+        - kimi
+        - xai
+        - openai
+        - openai-compatibility
+        - vertex
+        - vertex-anthropic
+    ProviderOAuthStartRequest:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          $ref: "#/components/schemas/ProviderID"
+        method:
+          type: string
+          description: Provider-specific login method. Kiro currently supports `builder_id_device` aliases.
+          enum:
+            - device_code
+            - builder_id_device
+            - aws_device
+            - builder_id_auth_code
+            - idc_device
+            - idc_auth_code
+        options:
+          type: object
+          additionalProperties: true
+          properties:
+            region:
+              type: string
+              example: us-east-1
+    ProviderOAuthCallbackRequest:
+      type: object
+      required: [session_id, state, code]
+      properties:
+        session_id:
+          type: string
+        state:
+          type: string
+        code:
+          type: string
+    ProviderOAuthSession:
+      type: object
+      required: [session_id, provider, status]
+      properties:
+        session_id:
+          type: string
+        provider:
+          $ref: "#/components/schemas/ProviderID"
+        status:
+          type: string
+          enum:
+            - starting
+            - awaiting_callback
+            - awaiting_device_confirmation
+            - completed
+            - failed
+            - expired
+            - cancelled
+        auth_url:
+          type: string
+        verification_uri:
+          type: string
+        user_code:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        interval_seconds:
+          type: integer
+        error:
+          type: string
+        credential:
+          $ref: "#/components/schemas/ProviderResponse"
+        state:
+          type: string
+          description: Legacy compatibility state. New clients should use `session_id`.
+    ProviderResponse:
+      type: object
+      required: [id, provider, label, disabled, validation]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [oauth, api_key]
+        provider:
+          $ref: "#/components/schemas/ProviderID"
+        label:
+          type: string
+        disabled:
+          type: boolean
+        secret:
+          type: string
+          description: Redacted or empty secret.
+        project_id:
+          type: string
+        priority:
+          type: integer
+        prefix:
+          type: string
+        base_url:
+          type: string
+        proxy_url:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        excluded_models:
+          type: array
+          items:
+            type: string
+        validation:
+          $ref: "#/components/schemas/ProviderValidation"
+    ProviderPatchRequest:
+      type: object
+      properties:
+        label:
+          type: string
+        disabled:
+          type: boolean
+        prefix:
+          type: string
+        proxy_url:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        priority:
+          type: integer
+        excluded_models:
+          type: array
+          items:
+            type: string
+    ProviderValidation:
+      type: object
+      required: [valid, auth_type]
+      properties:
+        valid:
+          type: boolean
+        auth_type:
+          type: string
+          enum: [oauth, api_key]
+        supported_models:
+          type: array
+          items:
+            type: string
+        account_identity:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        duplicate_provider_ids:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        checked_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+    ProviderSyncSummary:
+      type: object
+      properties:
+        provider:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+        supported_models:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+    QuotaView:
+      type: object
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuotaProvider"
+        summary:
+          $ref: "#/components/schemas/QuotaSummary"
+        account_switching:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    QuotaProvider:
+      type: object
+      properties:
+        provider:
+          type: string
+        provider_key:
+          type: string
+        display_name:
+          type: string
+        supported:
+          type: boolean
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuotaAccount"
+      additionalProperties: true
+    QuotaAccount:
+      type: object
+      properties:
+        id:
+          type: string
+        auth_id:
+          type: string
+        provider:
+          type: string
+        label:
+          type: string
+        account:
+          type: string
+        email:
+          type: string
+        status:
+          type: string
+        is_forbidden:
+          type: boolean
+        quota:
+          type: object
+          additionalProperties: true
+        last_refresh:
+          type: string
+          format: date-time
+      additionalProperties: true
+    QuotaSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        active:
+          type: integer
+        exhausted:
+          type: integer
+        forbidden:
+          type: integer
+      additionalProperties: true
+    AuthFileEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        auth_index:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        provider:
+          type: string
+        label:
+          type: string
+        status:
+          type: string
+        status_message:
+          type: string
+        disabled:
+          type: boolean
+        unavailable:
+          type: boolean
+        runtime_only:
+          type: boolean
+        source:
+          type: string
+        email:
+          type: string
+        project_id:
+          type: string
+        priority:
+          type: integer
+        note:
+          type: string
+        path:
+          type: string
+      additionalProperties: true
+    AuthFilePatchRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        prefix:
+          type: string
+        proxy_url:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        priority:
+          type: integer
+        note:
+          type: string
+    Config:
+      type: object
+      additionalProperties: true
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+      additionalProperties: true
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+      additionalProperties: true
