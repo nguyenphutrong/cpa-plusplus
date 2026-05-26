@@ -40,6 +40,24 @@ func TestGetQuotaReturnsEmptyView(t *testing.T) {
 	}
 }
 
+func TestProviderQuotaCompatibilityEndpointsReturnView(t *testing.T) {
+	router, _ := testQuotaRouter(t)
+
+	for _, path := range []string{"/v0/management/copilot-quota", "/v0/management/kiro-quota"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer test-management-key")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want %d body=%s", path, rec.Code, http.StatusOK, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"providers":[]`) {
+			t.Fatalf("%s body = %s, want empty providers", path, rec.Body.String())
+		}
+	}
+}
+
 func TestPostQuotaRefreshSingleCredentialStatuses(t *testing.T) {
 	router, manager := testQuotaRouter(t)
 	if _, err := manager.Register(context.Background(), &coreauth.Auth{
@@ -89,6 +107,8 @@ func testQuotaRouter(t *testing.T) (*gin.Engine, *coreauth.Manager) {
 	group.Use(handler.Middleware())
 	group.GET("/quota", handler.GetQuota)
 	group.GET("/quota/summary", handler.GetQuotaSummary)
+	group.GET("/copilot-quota", handler.GetCopilotQuota)
+	group.GET("/kiro-quota", handler.GetKiroQuota)
 	group.POST("/quota/refresh", handler.PostQuotaRefresh)
 	group.POST("/quota/refresh/:provider/:authID", handler.PostQuotaRefresh)
 	return router, manager
