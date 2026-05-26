@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/copilot"
@@ -59,29 +60,49 @@ func (a GitHubCopilotAuthenticator) Login(ctx context.Context, cfg *config.Confi
 	if err != nil {
 		return nil, fmt.Errorf("github-copilot: failed to verify Copilot access: %w", err)
 	}
-	storage := authSvc.CreateTokenStorage(bundle)
+	fmt.Printf("\nGitHub Copilot authentication successful for user: %s\n", bundle.Username)
+	return BuildGitHubCopilotAuthRecord(bundle, apiToken), nil
+}
+
+func BuildGitHubCopilotAuthRecord(bundle *copilot.AuthBundle, apiToken *copilot.APIToken) *coreauth.Auth {
+	if bundle == nil {
+		bundle = &copilot.AuthBundle{}
+	}
+	if bundle.TokenData == nil {
+		bundle.TokenData = &copilot.TokenData{}
+	}
+	username := strings.TrimSpace(bundle.Username)
+	if username == "" {
+		username = "unknown"
+	}
+	storage := &copilot.TokenStorage{
+		AccessToken: bundle.TokenData.AccessToken,
+		TokenType:   bundle.TokenData.TokenType,
+		Scope:       bundle.TokenData.Scope,
+		Username:    username,
+		Type:        "github-copilot",
+	}
 	now := time.Now()
 	metadata := map[string]any{
 		"type":         "github-copilot",
-		"username":     bundle.Username,
+		"username":     username,
 		"access_token": bundle.TokenData.AccessToken,
 		"token_type":   bundle.TokenData.TokenType,
 		"scope":        bundle.TokenData.Scope,
 		"timestamp":    now.UnixMilli(),
 	}
-	if apiToken.ExpiresAt > 0 {
+	if apiToken != nil && apiToken.ExpiresAt > 0 {
 		metadata["api_token_expires_at"] = apiToken.ExpiresAt
 	}
-	fileName := fmt.Sprintf("github-copilot-%s.json", bundle.Username)
-	fmt.Printf("\nGitHub Copilot authentication successful for user: %s\n", bundle.Username)
+	fileName := fmt.Sprintf("github-copilot-%s.json", username)
 	return &coreauth.Auth{
 		ID:       fileName,
-		Provider: a.Provider(),
+		Provider: "github-copilot",
 		FileName: fileName,
-		Label:    bundle.Username,
+		Label:    username,
 		Storage:  storage,
 		Metadata: metadata,
-	}, nil
+	}
 }
 
 func RefreshGitHubCopilotToken(ctx context.Context, cfg *config.Config, storage *copilot.TokenStorage) error {

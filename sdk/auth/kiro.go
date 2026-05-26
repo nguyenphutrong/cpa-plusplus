@@ -102,7 +102,7 @@ func loginKiroDeviceFlow(ctx context.Context, cfg *config.Config, opts *LoginOpt
 			return nil, result.Err
 		}
 		if result.Bundle != nil {
-			return authRecordFromKiroBundle(result.Bundle, "aws-device"), nil
+			return BuildKiroAuthRecord(result.Bundle, "aws-device"), nil
 		}
 	}
 	return nil, fmt.Errorf("kiro device authorization timed out")
@@ -139,12 +139,19 @@ func importKiroToken(ctx context.Context, path string) (*coreauth.Auth, error) {
 	if bundle.AccessToken == "" || bundle.RefreshToken == "" {
 		return nil, fmt.Errorf("kiro import: token file must contain access_token and refresh_token")
 	}
-	return authRecordFromKiroBundle(bundle, "import"), nil
+	return BuildKiroAuthRecord(bundle, "import"), nil
 }
 
-func authRecordFromKiroBundle(bundle *kiro.TokenBundle, source string) *coreauth.Auth {
+func BuildKiroAuthRecord(bundle *kiro.TokenBundle, source string) *coreauth.Auth {
+	if bundle == nil {
+		bundle = &kiro.TokenBundle{}
+	}
 	if bundle.Region == "" {
 		bundle.Region = kiro.DefaultRegion
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = "aws-device"
 	}
 	label := "kiro-" + source
 	idPart := sanitizeKiroIdentifier(firstKiroNonEmpty(bundle.Email, bundle.Username, bundle.Subject, bundle.ProfileARN, bundle.ClientID, "account"))
