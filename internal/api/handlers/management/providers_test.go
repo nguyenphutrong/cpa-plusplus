@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -63,5 +65,62 @@ func TestProviderFacadeListsAndPatchesOAuthCredentials(t *testing.T) {
 	}
 	if patched["label"] != "New Label" || patched["disabled"] != true {
 		t.Fatalf("unexpected patch payload: %#v", patched)
+	}
+}
+
+func TestDeleteProviderRemovesCredentialFromProviderList(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+	gin.SetMode(gin.TestMode)
+
+	authDir := t.TempDir()
+	fileName := "kiro-test.json"
+	authPath := filepath.Join(authDir, fileName)
+	if err := os.WriteFile(authPath, []byte(`{"type":"kiro","access_token":"token"}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth := &coreauth.Auth{
+		ID:       "kiro-1",
+		Provider: "kiro",
+		FileName: fileName,
+		Attributes: map[string]string{
+			"path": authPath,
+		},
+	}
+	if _, err := manager.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: authDir}, manager)
+	h.tokenStore = &memoryAuthStore{}
+
+	deleteRec := httptest.NewRecorder()
+	deleteCtx, _ := gin.CreateTestContext(deleteRec)
+	deleteCtx.Params = gin.Params{{Key: "id", Value: "kiro-1"}}
+	deleteCtx.Request = httptest.NewRequest(http.MethodDelete, "/v0/management/providers/kiro-1", nil)
+	h.DeleteProvider(deleteCtx)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	if _, err := os.Stat(authPath); !os.IsNotExist(err) {
+		t.Fatalf("auth file still exists or stat failed unexpectedly: %v", err)
+	}
+	if _, ok := manager.GetByID("kiro-1"); ok {
+		t.Fatal("deleted provider remained in auth manager")
+	}
+
+	listRec := httptest.NewRecorder()
+	listCtx, _ := gin.CreateTestContext(listRec)
+	listCtx.Request = httptest.NewRequest(http.MethodGet, "/v0/management/providers", nil)
+	h.ListProviders(listCtx)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var listed []map[string]any
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("providers after delete = %#v, want empty", listed)
 	}
 }

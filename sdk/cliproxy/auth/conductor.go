@@ -1191,6 +1191,38 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	return auth.Clone(), nil
 }
 
+// UnregisterAuth removes an auth entry from runtime state after its backing
+// credential has already been deleted.
+func (m *Manager) UnregisterAuth(authID string) bool {
+	authID = strings.TrimSpace(authID)
+	if authID == "" {
+		return false
+	}
+	m.mu.Lock()
+	if _, ok := m.auths[authID]; !ok {
+		m.mu.Unlock()
+		return false
+	}
+	delete(m.auths, authID)
+	for sessionID, auths := range m.homeRuntimeAuths {
+		delete(auths, authID)
+		if len(auths) == 0 {
+			delete(m.homeRuntimeAuths, sessionID)
+		}
+	}
+	loop := m.refreshLoop
+	m.mu.Unlock()
+
+	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
+	if m.scheduler != nil {
+		m.scheduler.removeAuth(authID)
+	}
+	if loop != nil {
+		loop.remove(authID)
+	}
+	return true
+}
+
 // Load resets manager state from the backing store.
 func (m *Manager) Load(ctx context.Context) error {
 	m.mu.Lock()
