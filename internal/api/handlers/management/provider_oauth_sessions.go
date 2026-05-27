@@ -86,6 +86,10 @@ func failProviderOAuthSession(sessionID, message string) {
 	providerOAuthSessions.Fail(sessionID, message)
 }
 
+func isProviderOAuthSessionTerminal(sessionID string) bool {
+	return providerOAuthSessions.IsTerminal(sessionID)
+}
+
 func (s *providerOAuthSessionStore) Store(session *providerOAuthSession) {
 	if session == nil || strings.TrimSpace(session.ID) == "" {
 		return
@@ -161,6 +165,21 @@ func (s *providerOAuthSessionStore) Cancel(sessionID string) (providerOAuthSessi
 		}
 	}
 	return providerOAuthSessionToResponse(session), true
+}
+
+func (s *providerOAuthSessionStore) IsTerminal(sessionID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session := s.sessions[strings.TrimSpace(sessionID)]
+	if session == nil {
+		return true
+	}
+	switch session.Status {
+	case providerOAuthSessionCompleted, providerOAuthSessionFailed, providerOAuthSessionExpired, providerOAuthSessionCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *providerOAuthSessionStore) isExpiredLocked(session *providerOAuthSession) bool {

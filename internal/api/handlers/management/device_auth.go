@@ -2,9 +2,11 @@ package management
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"time"
 
@@ -111,6 +113,8 @@ func (h *Handler) StartProviderOAuth(c *gin.Context) {
 		session, err = h.startGitHubCopilotOAuthSession(ctx)
 	case "kiro":
 		session, err = h.startKiroOAuthSession(ctx, req.Method, optionString(req.Options, "region"))
+	case "anthropic", "codex", "gemini", "antigravity", "kimi", "xai":
+		session, err = h.startCallbackProviderOAuthSession(c, provider)
 	default:
 		err = fmt.Errorf("unsupported oauth provider %q", req.Provider)
 	}
@@ -119,6 +123,111 @@ func (h *Handler) StartProviderOAuth(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, session)
+}
+
+func (h *Handler) startCallbackProviderOAuthSession(c *gin.Context, provider string) (providerOAuthSessionResponse, error) {
+	handler, path, ok := callbackProviderOAuthStarter(h, provider)
+	if !ok {
+		return providerOAuthSessionResponse{}, fmt.Errorf("unsupported oauth provider %q", provider)
+	}
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if c != nil && c.Request != nil {
+		req = req.WithContext(c.Request.Context())
+		req.Header = c.Request.Header.Clone()
+	}
+	ctx.Request = req
+
+	handler(ctx)
+	if rec.Code != http.StatusOK {
+		var payload struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &payload)
+		if strings.TrimSpace(payload.Error) == "" {
+			payload.Error = strings.TrimSpace(rec.Body.String())
+		}
+		if strings.TrimSpace(payload.Error) == "" {
+			payload.Error = fmt.Sprintf("failed to start %s oauth", provider)
+		}
+		return providerOAuthSessionResponse{}, errors.New(payload.Error)
+	}
+
+	var payload struct {
+		URL   string `json:"url"`
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		return providerOAuthSessionResponse{}, fmt.Errorf("decode oauth start response: %w", err)
+	}
+	state := strings.TrimSpace(payload.State)
+	authURL := strings.TrimSpace(payload.URL)
+	if state == "" || authURL == "" {
+		return providerOAuthSessionResponse{}, fmt.Errorf("oauth start response missing state or url")
+	}
+
+	session := &providerOAuthSession{
+		ID:              newProviderOAuthSessionID(provider),
+		State:           state,
+		Provider:        provider,
+		Status:          providerOAuthSessionAwaitingCallback,
+		AuthURL:         authURL,
+		ExpiresAt:       time.Now().UTC().Add(oauthSessionTTL),
+		IntervalSeconds: 2,
+	}
+	storeProviderOAuthSession(session)
+	go bridgeLegacyOAuthSession(session.ID, state, provider)
+	return providerOAuthSessionToResponse(session), nil
+}
+
+func callbackProviderOAuthStarter(h *Handler, provider string) (func(*gin.Context), string, bool) {
+	switch provider {
+	case "anthropic":
+		return h.RequestAnthropicToken, "/v0/management/anthropic-auth-url", true
+	case "codex":
+		return h.RequestCodexToken, "/v0/management/codex-auth-url", true
+	case "gemini":
+		return h.RequestGeminiCLIToken, "/v0/management/gemini-cli-auth-url", true
+	case "antigravity":
+		return h.RequestAntigravityToken, "/v0/management/antigravity-auth-url", true
+	case "kimi":
+		return h.RequestKimiToken, "/v0/management/kimi-auth-url", true
+	case "xai":
+		return h.RequestXAIToken, "/v0/management/xai-auth-url", true
+	default:
+		return nil, "", false
+	}
+}
+
+func bridgeLegacyOAuthSession(sessionID, state, provider string) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.Now().Add(oauthSessionTTL)
+	for {
+		if isProviderOAuthSessionTerminal(sessionID) {
+			return
+		}
+		legacyProvider, legacyStatus, ok := GetOAuthSession(state)
+		if !ok {
+			completeProviderOAuthSession(sessionID, nil)
+			return
+		}
+		if legacyStatus != "" {
+			failProviderOAuthSession(sessionID, legacyStatus)
+			return
+		}
+		if !strings.EqualFold(legacyProvider, provider) {
+			failProviderOAuthSession(sessionID, "OAuth provider changed while waiting for callback")
+			return
+		}
+		if time.Now().After(deadline) {
+			failProviderOAuthSession(sessionID, "OAuth session expired")
+			return
+		}
+		<-ticker.C
+	}
 }
 
 func (h *Handler) GetProviderOAuthSession(c *gin.Context) {
