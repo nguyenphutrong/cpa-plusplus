@@ -35,6 +35,8 @@ type providerOAuthSession struct {
 	IntervalSeconds int
 	Error           string
 	Credential      gin.H
+	CodeVerifier    string
+	RedirectURI     string
 }
 
 type providerOAuthSessionResponse struct {
@@ -116,6 +118,25 @@ func (s *providerOAuthSessionStore) Status(sessionID string) (providerOAuthSessi
 		session.Error = "OAuth session expired"
 	}
 	return providerOAuthSessionToResponse(session), true
+}
+
+func (s *providerOAuthSessionStore) Session(sessionID string) (*providerOAuthSession, bool) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[sessionID]
+	if !ok || session == nil {
+		return nil, false
+	}
+	if s.isExpiredLocked(session) {
+		session.Status = providerOAuthSessionExpired
+		session.Error = "OAuth session expired"
+	}
+	cp := *session
+	return &cp, true
 }
 
 func (s *providerOAuthSessionStore) Complete(sessionID string, credential gin.H) {

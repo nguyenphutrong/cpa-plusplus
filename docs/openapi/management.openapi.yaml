@@ -1405,8 +1405,10 @@ components:
           $ref: "#/components/schemas/ProviderID"
         method:
           type: string
-          description: Provider-specific login method. Kiro currently supports `builder_id_device` aliases.
+          description: Provider-specific login method. Kiro defaults to `signin_localhost`; device aliases remain explicit fallback methods.
           enum:
+            - signin_localhost
+            - signin
             - device_code
             - builder_id_device
             - aws_device

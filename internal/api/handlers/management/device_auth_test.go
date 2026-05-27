@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -216,7 +217,7 @@ func TestRequestKiroTokenStartsDeviceFlowAndSavesAuth(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/v0/management/kiro-auth-url", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v0/management/kiro-auth-url?method=device_code", nil)
 	h.RequestKiroToken(ctx)
 
 	if rec.Code != http.StatusOK {
@@ -236,6 +237,90 @@ func TestRequestKiroTokenStartsDeviceFlowAndSavesAuth(t *testing.T) {
 
 	waitForSavedAuth(t, store, "kiro-aws-device-dev-example.com.json")
 	waitForSessionRemoved(t, state)
+}
+
+func TestStartProviderOAuthKiroSignInCallbackSavesFullAuth(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+	gin.SetMode(gin.TestMode)
+	resetOAuthSessionsForTest(t)
+	resetProviderOAuthSessionsForTest(t)
+	requireCallbackPortAvailable(t, kiroSignInCallbackPort)
+
+	redirectURISeen := make(chan string, 1)
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&payload); err == nil {
+			select {
+			case redirectURISeen <- strings.TrimSpace(payload["redirect_uri"]):
+			default:
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"accessToken":"kiro-access","refreshToken":"kiro-refresh","profileArn":"arn:aws:kiro:us-east-1:123:profile/dev","expiresIn":3600,"email":"dev@example.com","username":"dev","sub":"subject-1"}`))
+	}))
+	defer tokenServer.Close()
+	origSocialToken := kiro.SocialToken
+	kiro.SocialToken = tokenServer.URL
+	t.Cleanup(func() { kiro.SocialToken = origSocialToken })
+
+	store := &memoryAuthStore{}
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, coreauth.NewManager(nil, nil, nil))
+	h.tokenStore = store
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v0/management/providers/oauth/start", strings.NewReader(`{"provider":"kiro"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	h.StartProviderOAuth(ctx)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var started providerOAuthSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &started); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if started.Provider != "kiro" || started.Status != providerOAuthSessionAwaitingCallback {
+		t.Fatalf("unexpected session: %#v", started)
+	}
+	authURL, err := url.Parse(started.AuthURL)
+	if err != nil {
+		t.Fatalf("parse auth url: %v", err)
+	}
+	if authURL.Host != "app.kiro.dev" || authURL.Path != "/signin" {
+		t.Fatalf("auth url = %q, want kiro signin", started.AuthURL)
+	}
+	if got := authURL.Query().Get("redirect_uri"); got != "http://localhost:3128" {
+		t.Fatalf("redirect_uri = %q, want localhost signin redirect", got)
+	}
+	state := strings.TrimSpace(authURL.Query().Get("state"))
+	if state == "" {
+		t.Fatalf("missing state in auth url: %q", started.AuthURL)
+	}
+	callbackResp, err := http.Get("http://127.0.0.1:3128/oauth/callback?code=auth-code-1&state=" + url.QueryEscape(state) + "&login_option=github")
+	if err != nil {
+		t.Fatalf("invoke localhost callback: %v", err)
+	}
+	_ = callbackResp.Body.Close()
+
+	waitForProviderOAuthStatus(t, started.SessionID, providerOAuthSessionCompleted)
+	auth := waitForSavedProviderAuth(t, store, "kiro")
+	if got := metaStringValue(auth.Metadata, "profile_arn"); got != "arn:aws:kiro:us-east-1:123:profile/dev" {
+		t.Fatalf("profile_arn = %q", got)
+	}
+	if got := metaStringValue(auth.Metadata, "refresh_token"); got != "kiro-refresh" {
+		t.Fatalf("refresh_token = %q", got)
+	}
+	if got := metaStringValue(auth.Metadata, "email"); got != "dev@example.com" {
+		t.Fatalf("email = %q", got)
+	}
+	select {
+	case seen := <-redirectURISeen:
+		if seen != "http://localhost:3128/oauth/callback?login_option=github" {
+			t.Fatalf("redirect_uri = %q", seen)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for token exchange payload")
+	}
 }
 
 func TestStartProviderOAuthRejectsUnsupportedKiroMethod(t *testing.T) {
@@ -352,6 +437,24 @@ func waitForSavedAuth(t *testing.T, store *memoryAuthStore, id string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("auth %q was not saved", id)
+}
+
+func waitForSavedProviderAuth(t *testing.T, store *memoryAuthStore, provider string) *coreauth.Auth {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		store.mu.Lock()
+		for _, item := range store.items {
+			if item != nil && item.Provider == provider {
+				store.mu.Unlock()
+				return item
+			}
+		}
+		store.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("auth for provider %q was not saved", provider)
+	return nil
 }
 
 func waitForSessionRemoved(t *testing.T, state string) {

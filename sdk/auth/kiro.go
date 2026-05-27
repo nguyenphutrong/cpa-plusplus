@@ -222,8 +222,32 @@ func RefreshKiroToken(ctx context.Context, cfg *config.Config, auth *coreauth.Au
 	auth.Metadata["access_token"] = bundle.AccessToken
 	auth.Metadata["refresh_token"] = firstKiroNonEmpty(bundle.RefreshToken, refreshToken)
 	auth.Metadata["expires_at"] = bundle.ExpiresAt.Format(time.RFC3339)
+	if bundle.ProfileARN != "" {
+		auth.Metadata["profile_arn"] = bundle.ProfileARN
+		if auth.Attributes == nil {
+			auth.Attributes = map[string]string{}
+		}
+		auth.Attributes["profile_arn"] = bundle.ProfileARN
+	}
+	if bundle.Region != "" {
+		auth.Metadata["region"] = bundle.Region
+		if auth.Attributes == nil {
+			auth.Attributes = map[string]string{}
+		}
+		auth.Attributes["region"] = bundle.Region
+	}
 	if bundle.Email != "" {
 		auth.Metadata["email"] = bundle.Email
+		if auth.Attributes == nil {
+			auth.Attributes = map[string]string{}
+		}
+		auth.Attributes["email"] = bundle.Email
+	}
+	if bundle.Username != "" {
+		auth.Metadata["username"] = bundle.Username
+	}
+	if bundle.Subject != "" {
+		auth.Metadata["subject"] = bundle.Subject
 	}
 	auth.UpdatedAt = time.Now().UTC()
 	auth.NextRefreshAfter = bundle.ExpiresAt.Add(-20 * time.Minute)

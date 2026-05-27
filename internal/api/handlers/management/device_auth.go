@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 )
 
 const defaultDeviceAuthTimeout = 10 * time.Minute
+const kiroSignInCallbackPort = 3128
 
 type githubCopilotDeviceAuth interface {
 	StartDeviceFlow(context.Context) (*copilot.DeviceCodeResponse, error)
@@ -287,6 +290,15 @@ func (h *Handler) PostProviderOAuthCallback(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "oauth state mismatch"})
 		return
 	}
+	if session.Provider == "kiro" {
+		completed, err := h.completeKiroOAuthCallback(c.Request.Context(), req.SessionID, req.State, req.Code, "")
+		if err != nil {
+			c.JSON(statusForOAuthStartError(err), gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, completed)
+		return
+	}
 	if _, err := WriteOAuthCallbackFileForPendingSession(h.cfg.AuthDir, session.Provider, req.State, req.Code, ""); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -369,7 +381,10 @@ func (h *Handler) startGitHubCopilotOAuthSession(ctx context.Context) (providerO
 func (h *Handler) startKiroOAuthSession(ctx context.Context, method, region string) (providerOAuthSessionResponse, error) {
 	method = strings.TrimSpace(strings.ToLower(method))
 	if method == "" {
-		method = "builder_id_device"
+		method = "signin_localhost"
+	}
+	if isKiroSignInMethod(method) {
+		return h.startKiroSignInLocalhost(ctx)
 	}
 	switch method {
 	case "builder_id_device", "aws_device", "device_code":
@@ -425,6 +440,217 @@ func (h *Handler) startKiroOAuthSession(ctx context.Context, method, region stri
 
 	go h.pollKiroDeviceAuthorization(ctx, session.ID, state, region, service, reg, device)
 	return providerOAuthSessionToResponse(session), nil
+}
+
+func isKiroSignInMethod(method string) bool {
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "kiro", "signin", "signin_localhost", "builder_id_auth_code":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Handler) startKiroSignInLocalhost(ctx context.Context) (providerOAuthSessionResponse, error) {
+	cfg := h.cfg
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	service := kiro.NewService(util.SetProxy(&cfg.SDKConfig, &http.Client{Timeout: 30 * time.Second}))
+	pkce, err := kiro.GeneratePKCECodes()
+	if err != nil {
+		return providerOAuthSessionResponse{}, fmt.Errorf("failed to generate kiro pkce: %w", err)
+	}
+	state, errState := misc.GenerateRandomState()
+	if errState != nil {
+		return providerOAuthSessionResponse{}, fmt.Errorf("failed to generate state parameter: %w", errState)
+	}
+	signInRedirectURI := fmt.Sprintf("http://localhost:%d", kiroSignInCallbackPort)
+	tokenRedirectURI := fmt.Sprintf("http://localhost:%d/oauth/callback", kiroSignInCallbackPort)
+	authURL, err := service.BuildSignInAuthURL(pkce.CodeChallenge, state, signInRedirectURI)
+	if err != nil {
+		return providerOAuthSessionResponse{}, fmt.Errorf("failed to build kiro signin url: %w", err)
+	}
+	session := &providerOAuthSession{
+		ID:              newProviderOAuthSessionID("kiro"),
+		State:           state,
+		Provider:        "kiro",
+		Method:          "signin_localhost",
+		Status:          providerOAuthSessionAwaitingCallback,
+		AuthURL:         authURL,
+		ExpiresAt:       time.Now().Add(defaultDeviceAuthTimeout),
+		IntervalSeconds: 2,
+		CodeVerifier:    pkce.CodeVerifier,
+		RedirectURI:     tokenRedirectURI,
+	}
+	RegisterOAuthSession(state, "kiro")
+	storeProviderOAuthSession(session)
+	if err := h.startKiroLocalCallbackReceiver(ctx, session.ID, state); err != nil {
+		CompleteOAuthSession(state)
+		failProviderOAuthSession(session.ID, err.Error())
+		return providerOAuthSessionResponse{}, err
+	}
+	return providerOAuthSessionToResponse(session), nil
+}
+
+func (h *Handler) startKiroLocalCallbackReceiver(ctx context.Context, sessionID, expectedState string) error {
+	addr := fmt.Sprintf("127.0.0.1:%d", kiroSignInCallbackPort)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("failed to bind localhost callback port %d: %w", kiroSignInCallbackPort, err)
+	}
+	server := &http.Server{ReadHeaderTimeout: 10 * time.Second}
+	shutdown := func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}
+	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/callback" {
+			http.NotFound(w, r)
+			return
+		}
+		query := r.URL.Query()
+		code := strings.TrimSpace(query.Get("code"))
+		state := strings.TrimSpace(query.Get("state"))
+		errValue := strings.TrimSpace(query.Get("error"))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if errValue != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("<html><body><h1>Login failed</h1><p>You can close this window.</p></body></html>"))
+			failProviderOAuthSession(sessionID, fmt.Sprintf("oauth callback error: %s", errValue))
+			CompleteOAuthSession(expectedState)
+			go shutdown()
+			return
+		}
+		if state != expectedState {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("<html><body><h1>State mismatch</h1><p>You can close this window.</p></body></html>"))
+			failProviderOAuthSession(sessionID, "oauth state mismatch")
+			CompleteOAuthSession(expectedState)
+			go shutdown()
+			return
+		}
+		if code == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("<html><body><h1>Missing code</h1><p>You can close this window.</p></body></html>"))
+			failProviderOAuthSession(sessionID, "oauth code is missing")
+			CompleteOAuthSession(expectedState)
+			go shutdown()
+			return
+		}
+		_, _ = w.Write([]byte("<html><body><h1>Login successful</h1><p>You can close this window.</p></body></html>"))
+		redirectURI := resolveKiroExchangeRedirectURI(r.URL)
+		if _, errComplete := h.completeKiroOAuthCallback(context.Background(), sessionID, state, code, redirectURI); errComplete != nil {
+			log.WithError(errComplete).Warn("failed to complete kiro oauth callback")
+		}
+		go shutdown()
+	})
+	go func() {
+		if errServe := server.Serve(listener); errServe != nil && errServe != http.ErrServerClosed {
+			failProviderOAuthSession(sessionID, fmt.Sprintf("localhost oauth callback server failed: %v", errServe))
+		}
+	}()
+	go func() {
+		deadline := time.Now().Add(defaultDeviceAuthTimeout)
+		if session, ok := providerOAuthSessions.Session(sessionID); ok && !session.ExpiresAt.IsZero() {
+			deadline = session.ExpiresAt
+		}
+		wait := time.Until(deadline)
+		if wait < 0 {
+			wait = 0
+		}
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+		shutdown()
+		if session, ok := providerOAuthSessions.Status(sessionID); ok && session.Status == providerOAuthSessionAwaitingCallback {
+			failProviderOAuthSession(sessionID, "OAuth session expired")
+			CompleteOAuthSession(expectedState)
+		}
+	}()
+	return nil
+}
+
+func resolveKiroExchangeRedirectURI(callbackURL *url.URL) string {
+	base := fmt.Sprintf("http://localhost:%d/oauth/callback", kiroSignInCallbackPort)
+	if callbackURL == nil {
+		return base
+	}
+	loginOption := strings.ToLower(strings.TrimSpace(callbackURL.Query().Get("login_option")))
+	if loginOption == "" {
+		return base
+	}
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	query := parsed.Query()
+	query.Set("login_option", loginOption)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func (h *Handler) completeKiroOAuthCallback(ctx context.Context, sessionID, state, code, redirectURIOverride string) (providerOAuthSessionResponse, error) {
+	session, ok := providerOAuthSessions.Session(sessionID)
+	if !ok {
+		return providerOAuthSessionResponse{}, errors.New("oauth session not found")
+	}
+	if session.Provider != "kiro" {
+		return providerOAuthSessionResponse{}, errors.New("callback completion is only supported for kiro sessions")
+	}
+	if session.Status != providerOAuthSessionAwaitingCallback {
+		return providerOAuthSessionResponse{}, fmt.Errorf("session is not awaiting callback (status=%s)", session.Status)
+	}
+	if strings.TrimSpace(state) == "" || strings.TrimSpace(code) == "" {
+		return providerOAuthSessionResponse{}, errors.New("code and state are required")
+	}
+	if state != session.State {
+		failProviderOAuthSession(sessionID, "OAuth state mismatch")
+		SetOAuthSessionError(session.State, "OAuth state mismatch")
+		return providerOAuthSessionResponse{}, errors.New("oauth state mismatch")
+	}
+	redirectURI := strings.TrimSpace(session.RedirectURI)
+	if strings.TrimSpace(redirectURIOverride) != "" {
+		redirectURI = strings.TrimSpace(redirectURIOverride)
+	}
+	cfg := h.cfg
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	service := kiro.NewService(util.SetProxy(&cfg.SDKConfig, &http.Client{Timeout: 30 * time.Second}))
+	bundle, err := service.ExchangeSocialCode(ctx, code, session.CodeVerifier, redirectURI)
+	if err != nil {
+		err = fmt.Errorf("kiro oauth token exchange failed (redirect_uri=%q): %w", redirectURI, err)
+		failProviderOAuthSession(sessionID, err.Error())
+		SetOAuthSessionError(session.State, err.Error())
+		return providerOAuthSessionResponse{}, err
+	}
+	record := sdkAuth.BuildKiroAuthRecord(bundle, session.Method)
+	if record.Metadata == nil {
+		record.Metadata = map[string]any{}
+	}
+	if record.Attributes == nil {
+		record.Attributes = map[string]string{}
+	}
+	record.Metadata["redirect_uri"] = redirectURI
+	record.Attributes["redirect_uri"] = redirectURI
+	savedPath, errSave := h.saveTokenRecord(ctx, record)
+	if errSave != nil {
+		errSave = fmt.Errorf("failed to save kiro authentication tokens: %w", errSave)
+		failProviderOAuthSession(sessionID, errSave.Error())
+		SetOAuthSessionError(session.State, errSave.Error())
+		return providerOAuthSessionResponse{}, errSave
+	}
+	log.Infof("Kiro authentication token saved to %s", savedPath)
+	CompleteOAuthSession(session.State)
+	CompleteOAuthSessionsByProvider("kiro")
+	completeProviderOAuthSession(sessionID, h.providerResponseFromAuth(record))
+	completed, _ := providerOAuthSessions.Status(sessionID)
+	return completed, nil
 }
 
 func (h *Handler) pollKiroDeviceAuthorization(ctx context.Context, sessionID, state, region string, service kiroDeviceAuth, reg *kiro.ClientRegistration, device *kiro.DeviceAuthorization) {
