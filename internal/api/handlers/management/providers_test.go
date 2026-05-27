@@ -12,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota/storage"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
@@ -48,6 +50,13 @@ func TestProviderFacadeListsAndPatchesOAuthCredentials(t *testing.T) {
 	}
 	if len(listed) != 1 || listed[0]["provider"] != "github-copilot" {
 		t.Fatalf("unexpected list payload: %#v", listed)
+	}
+	validation, ok := listed[0]["validation"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing validation payload: %#v", listed[0])
+	}
+	if got := validation["account_identity"]; got != "octo" {
+		t.Fatalf("account identity = %#v, want octo", got)
 	}
 
 	patchRec := httptest.NewRecorder()
@@ -122,5 +131,31 @@ func TestDeleteProviderRemovesCredentialFromProviderList(t *testing.T) {
 	}
 	if len(listed) != 0 {
 		t.Fatalf("providers after delete = %#v, want empty", listed)
+	}
+}
+
+func TestProviderFacadeUsesCachedQuotaAccountLabel(t *testing.T) {
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, nil)
+	auth := &coreauth.Auth{
+		ID:       "kiro-1",
+		Provider: "kiro",
+		FileName: "kiro-signin_localhost-profile.json",
+		Metadata: map[string]any{
+			"username": "kiro-local-user",
+			quota.MetadataKey: storage.QuotaData{
+				ProviderData: &storage.ProviderQuotaData{
+					AccountLabel: "dev@example.com",
+				},
+			},
+		},
+	}
+
+	response := h.providerResponseFromAuth(auth)
+	validation, ok := response["validation"].(gin.H)
+	if !ok {
+		t.Fatalf("missing validation payload: %#v", response)
+	}
+	if got := validation["account_identity"]; got != "dev@example.com" {
+		t.Fatalf("account identity = %#v, want dev@example.com", got)
 	}
 }

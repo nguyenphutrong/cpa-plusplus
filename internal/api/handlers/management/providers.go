@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/copilot"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
@@ -241,7 +242,7 @@ func (h *Handler) providerResponseFromAuth(auth *coreauth.Auth) gin.H {
 		"valid":     !auth.Disabled && auth.Status != coreauth.StatusDisabled && !auth.Unavailable,
 		"auth_type": "oauth",
 	}
-	if account := firstProviderNonEmpty(authEmail(auth), authAttribute(auth, "email"), metaStringValue(auth.Metadata, "email"), authAttribute(auth, "account")); account != "" {
+	if account := providerAccountIdentity(auth); account != "" {
 		validation["account_identity"] = account
 	}
 	if expiresAt := firstProviderNonEmpty(metaStringValue(auth.Metadata, "expires_at"), authAttribute(auth, "expires_at")); expiresAt != "" {
@@ -270,6 +271,30 @@ func (h *Handler) providerResponseFromAuth(auth *coreauth.Auth) gin.H {
 		out["excluded_models"] = excluded
 	}
 	return out
+}
+
+func providerAccountIdentity(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	provider := firstProviderNonEmpty(auth.Provider, authAttribute(auth, "provider"))
+	if account := firstProviderNonEmpty(
+		authEmail(auth),
+		authAttribute(auth, "email"),
+		metaStringValue(auth.Metadata, "email"),
+		authAttribute(auth, "account"),
+		metaStringValue(auth.Metadata, "account"),
+		quota.ProviderDataAccountLabel(provider, quota.CachedQuotaData(auth)),
+		authAttribute(auth, "username"),
+		metaStringValue(auth.Metadata, "username"),
+		authAttribute(auth, "account_id"),
+		metaStringValue(auth.Metadata, "account_id"),
+		authAttribute(auth, "login"),
+		metaStringValue(auth.Metadata, "login"),
+	); account != "" {
+		return account
+	}
+	return ""
 }
 
 func setAuthMetadataString(auth *coreauth.Auth, key, value string) {

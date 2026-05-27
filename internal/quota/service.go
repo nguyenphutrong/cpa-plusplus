@@ -163,10 +163,55 @@ func (s *SyncService) persistQuotaData(ctx context.Context, auth *coreauth.Auth,
 		auth.Metadata = map[string]any{}
 	}
 	auth.Metadata[MetadataKey] = data
+	persistQuotaAccountIdentity(auth, data)
 	if s != nil && s.manager != nil {
 		_, _ = s.manager.Update(ctx, auth)
 	}
 	return data, err
+}
+
+func persistQuotaAccountIdentity(auth *coreauth.Auth, data storage.QuotaData) {
+	if auth == nil {
+		return
+	}
+	account := ProviderDataAccountLabel(ProviderKey(auth), data)
+	if account == "" {
+		return
+	}
+	if auth.Metadata == nil {
+		auth.Metadata = map[string]any{}
+	}
+	if auth.Attributes == nil {
+		auth.Attributes = map[string]string{}
+	}
+	if strings.Contains(account, "@") {
+		setIdentityFieldIfEmpty(auth, "email", account)
+		setIdentityFieldIfEmpty(auth, "account", account)
+		return
+	}
+	if ProviderKey(auth) == "github-copilot" {
+		setIdentityFieldIfEmpty(auth, "username", account)
+	}
+	setIdentityFieldIfEmpty(auth, "account", account)
+}
+
+func setIdentityFieldIfEmpty(auth *coreauth.Auth, key, value string) {
+	value = strings.TrimSpace(value)
+	if auth == nil || value == "" {
+		return
+	}
+	if auth.Metadata == nil {
+		auth.Metadata = map[string]any{}
+	}
+	if auth.Attributes == nil {
+		auth.Attributes = map[string]string{}
+	}
+	if stringMetadata(auth.Metadata, key) == "" {
+		auth.Metadata[key] = value
+	}
+	if strings.TrimSpace(auth.Attributes[key]) == "" {
+		auth.Attributes[key] = value
+	}
 }
 
 func CachedQuotaData(auth *coreauth.Auth) storage.QuotaData {

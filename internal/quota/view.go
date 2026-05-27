@@ -242,11 +242,17 @@ func copilotChatModelViews(models []storage.CopilotChatModel) []CopilotChatModel
 }
 
 func quotaAccountLabel(provider string, quotaData storage.QuotaData) string {
+	return ProviderDataAccountLabel(provider, quotaData)
+}
+
+func ProviderDataAccountLabel(provider string, quotaData storage.QuotaData) string {
 	if quotaData.ProviderData == nil {
 		return ""
 	}
-	label := strings.ToLower(strings.TrimSpace(quotaData.ProviderData.AccountLabel))
-	if label == "" || label == strings.ToLower(strings.TrimSpace(provider)) {
+	label := strings.TrimSpace(quotaData.ProviderData.AccountLabel)
+	lowerLabel := strings.ToLower(label)
+	lowerProvider := strings.ToLower(strings.TrimSpace(provider))
+	if label == "" || lowerLabel == lowerProvider {
 		return ""
 	}
 	if strings.EqualFold(label, strings.TrimSpace(provider)+" account") {

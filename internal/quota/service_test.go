@@ -51,6 +51,92 @@ func TestSyncCredentialPersistsQuotaDataInAuthMetadata(t *testing.T) {
 	}
 }
 
+func TestSyncCredentialPersistsProviderAccountLabelAsEmail(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth := &coreauth.Auth{
+		ID:       "kiro-auth",
+		Provider: "kiro",
+		Metadata: map[string]any{
+			"access_token": "token",
+		},
+	}
+	if _, err := manager.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	service := NewSyncService(manager, nil)
+	service.SetFetchOverride(map[string]providers.QuotaFetchFunc{
+		"kiro": func(_ context.Context, input providers.QuotaFetchInput) (storage.QuotaData, error) {
+			if input.Secret != "token" {
+				t.Fatalf("secret = %q, want token", input.Secret)
+			}
+			return storage.QuotaData{
+				ProviderData: &storage.ProviderQuotaData{
+					AccountLabel: "dev@example.com",
+				},
+			}, nil
+		},
+	})
+
+	if _, err := service.SyncCredential(context.Background(), auth); err != nil {
+		t.Fatalf("sync credential: %v", err)
+	}
+
+	updated, ok := manager.GetByID("kiro-auth")
+	if !ok {
+		t.Fatal("updated auth not found")
+	}
+	if got := stringMetadata(updated.Metadata, "email"); got != "dev@example.com" {
+		t.Fatalf("metadata email = %q, want dev@example.com", got)
+	}
+	if got := updated.Attributes["email"]; got != "dev@example.com" {
+		t.Fatalf("attribute email = %q, want dev@example.com", got)
+	}
+}
+
+func TestSyncCredentialPersistsProviderAccountLabelAsUsername(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth := &coreauth.Auth{
+		ID:       "copilot-auth",
+		Provider: "github-copilot",
+		Metadata: map[string]any{
+			"access_token": "token",
+		},
+	}
+	if _, err := manager.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	service := NewSyncService(manager, nil)
+	service.SetFetchOverride(map[string]providers.QuotaFetchFunc{
+		"github-copilot": func(_ context.Context, input providers.QuotaFetchInput) (storage.QuotaData, error) {
+			if input.Secret != "token" {
+				t.Fatalf("secret = %q, want token", input.Secret)
+			}
+			return storage.QuotaData{
+				ProviderData: &storage.ProviderQuotaData{
+					AccountLabel: "octo",
+				},
+			}, nil
+		},
+	})
+
+	if _, err := service.SyncCredential(context.Background(), auth); err != nil {
+		t.Fatalf("sync credential: %v", err)
+	}
+
+	updated, ok := manager.GetByID("copilot-auth")
+	if !ok {
+		t.Fatal("updated auth not found")
+	}
+	if got := stringMetadata(updated.Metadata, "username"); got != "octo" {
+		t.Fatalf("metadata username = %q, want octo", got)
+	}
+	if got := updated.Attributes["account"]; got != "octo" {
+		t.Fatalf("attribute account = %q, want octo", got)
+	}
+}
+
 func TestSyncCredentialCachesFetchError(t *testing.T) {
 	manager := coreauth.NewManager(nil, nil, nil)
 	auth := &coreauth.Auth{
