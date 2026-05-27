@@ -131,6 +131,61 @@ func TestStartProviderOAuthCodexReturnsCallbackSession(t *testing.T) {
 	}
 }
 
+func TestStartProviderOAuthAntigravityReturnsCallbackSession(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+	gin.SetMode(gin.TestMode)
+	resetOAuthSessionsForTest(t)
+	resetProviderOAuthSessionsForTest(t)
+
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, coreauth.NewManager(nil, nil, nil))
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v0/management/providers/oauth/start", strings.NewReader(`{"provider":"antigravity"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	h.StartProviderOAuth(ctx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var payload providerOAuthSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Provider != "antigravity" || payload.Status != providerOAuthSessionAwaitingCallback {
+		t.Fatalf("unexpected session: %#v", payload)
+	}
+	if payload.SessionID == "" || payload.AuthURL == "" || payload.State == "" || payload.IntervalSeconds == 0 {
+		t.Fatalf("missing callback session fields: %#v", payload)
+	}
+	legacyProvider, legacyStatus, ok := GetOAuthSession(payload.State)
+	if !ok {
+		t.Fatalf("expected legacy oauth state to be registered")
+	}
+	if legacyProvider != "antigravity" || legacyStatus != "" {
+		t.Fatalf("legacy session = (%q, %q), want antigravity pending", legacyProvider, legacyStatus)
+	}
+}
+
+func TestStartProviderOAuthRejectsUnsupportedProvider(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+	gin.SetMode(gin.TestMode)
+	resetOAuthSessionsForTest(t)
+	resetProviderOAuthSessionsForTest(t)
+
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, coreauth.NewManager(nil, nil, nil))
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v0/management/providers/oauth/start", strings.NewReader(`{"provider":"unsupported"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	h.StartProviderOAuth(ctx)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
 func TestRequestKiroTokenStartsDeviceFlowAndSavesAuth(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
 	gin.SetMode(gin.TestMode)

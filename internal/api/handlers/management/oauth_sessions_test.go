@@ -8,6 +8,7 @@ func TestNormalizeOAuthProviderIncludesCopilotAndKiroAliases(t *testing.T) {
 		"github":         "github-copilot",
 		"copilot":        "github-copilot",
 		"github-copilot": "github-copilot",
+		"kimi":           "kimi",
 	}
 	for input, want := range tests {
 		got, err := NormalizeOAuthProvider(input)
