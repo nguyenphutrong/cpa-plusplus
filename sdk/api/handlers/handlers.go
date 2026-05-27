@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/routing"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
@@ -56,6 +57,13 @@ type pinnedAuthContextKey struct{}
 type selectedAuthCallbackContextKey struct{}
 type executionSessionContextKey struct{}
 type disallowFreeAuthContextKey struct{}
+
+type requestDetails struct {
+	providers       []string
+	normalizedModel string
+	virtualTargets  []routing.VirtualTarget
+	err             *interfaces.ErrorMessage
+}
 
 // WithPinnedAuthID returns a child context that requests execution on a specific auth ID.
 func WithPinnedAuthID(ctx context.Context, authID string) context.Context {
@@ -555,19 +563,22 @@ func (h *BaseAPIHandler) ExecuteImageWithAuthManager(ctx context.Context, handle
 }
 
 func (h *BaseAPIHandler) executeWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string, allowImageModel bool) ([]byte, http.Header, *interfaces.ErrorMessage) {
-	providers, normalizedModel, errMsg := h.getRequestDetailsWithOptions(modelName, allowImageModel)
-	if errMsg != nil {
-		return nil, nil, errMsg
+	details := h.getRequestDetailsForExecution(modelName, allowImageModel)
+	if details.err != nil {
+		return nil, nil, details.err
 	}
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
-	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
+	if len(details.virtualTargets) > 0 {
+		reqMeta[coreexecutor.VirtualTargetsMetadataKey] = details.virtualTargets
+	}
+	setReasoningEffortMetadata(reqMeta, handlerType, details.normalizedModel, rawJSON)
 	payload := rawJSON
 	if len(payload) == 0 {
 		payload = nil
 	}
 	req := coreexecutor.Request{
-		Model:   normalizedModel,
+		Model:   details.normalizedModel,
 		Payload: payload,
 	}
 	opts := coreexecutor.Options{
@@ -578,9 +589,9 @@ func (h *BaseAPIHandler) executeWithAuthManager(ctx context.Context, handlerType
 		Headers:         headersFromContext(ctx),
 	}
 	opts.Metadata = reqMeta
-	resp, err := h.AuthManager.Execute(ctx, providers, req, opts)
+	resp, err := h.AuthManager.Execute(ctx, details.providers, req, opts)
 	if err != nil {
-		err = enrichAuthSelectionError(err, providers, normalizedModel)
+		err = enrichAuthSelectionError(err, details.providers, details.normalizedModel)
 		status := http.StatusInternalServerError
 		if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
 			if code := se.StatusCode(); code > 0 {
@@ -604,19 +615,22 @@ func (h *BaseAPIHandler) executeWithAuthManager(ctx context.Context, handlerType
 // ExecuteCountWithAuthManager executes a non-streaming request via the core auth manager.
 // This path is the only supported execution route.
 func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string) ([]byte, http.Header, *interfaces.ErrorMessage) {
-	providers, normalizedModel, errMsg := h.getRequestDetails(modelName)
-	if errMsg != nil {
-		return nil, nil, errMsg
+	details := h.getRequestDetailsForExecution(modelName, false)
+	if details.err != nil {
+		return nil, nil, details.err
 	}
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
-	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
+	if len(details.virtualTargets) > 0 {
+		reqMeta[coreexecutor.VirtualTargetsMetadataKey] = details.virtualTargets
+	}
+	setReasoningEffortMetadata(reqMeta, handlerType, details.normalizedModel, rawJSON)
 	payload := rawJSON
 	if len(payload) == 0 {
 		payload = nil
 	}
 	req := coreexecutor.Request{
-		Model:   normalizedModel,
+		Model:   details.normalizedModel,
 		Payload: payload,
 	}
 	opts := coreexecutor.Options{
@@ -627,9 +641,9 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 		Headers:         headersFromContext(ctx),
 	}
 	opts.Metadata = reqMeta
-	resp, err := h.AuthManager.ExecuteCount(ctx, providers, req, opts)
+	resp, err := h.AuthManager.ExecuteCount(ctx, details.providers, req, opts)
 	if err != nil {
-		err = enrichAuthSelectionError(err, providers, normalizedModel)
+		err = enrichAuthSelectionError(err, details.providers, details.normalizedModel)
 		status := http.StatusInternalServerError
 		if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
 			if code := se.StatusCode(); code > 0 {
@@ -663,22 +677,25 @@ func (h *BaseAPIHandler) ExecuteImageStreamWithAuthManager(ctx context.Context, 
 }
 
 func (h *BaseAPIHandler) executeStreamWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string, allowImageModel bool) (<-chan []byte, http.Header, <-chan *interfaces.ErrorMessage) {
-	providers, normalizedModel, errMsg := h.getRequestDetailsWithOptions(modelName, allowImageModel)
-	if errMsg != nil {
+	details := h.getRequestDetailsForExecution(modelName, allowImageModel)
+	if details.err != nil {
 		errChan := make(chan *interfaces.ErrorMessage, 1)
-		errChan <- errMsg
+		errChan <- details.err
 		close(errChan)
 		return nil, nil, errChan
 	}
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
-	setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
+	if len(details.virtualTargets) > 0 {
+		reqMeta[coreexecutor.VirtualTargetsMetadataKey] = details.virtualTargets
+	}
+	setReasoningEffortMetadata(reqMeta, handlerType, details.normalizedModel, rawJSON)
 	payload := rawJSON
 	if len(payload) == 0 {
 		payload = nil
 	}
 	req := coreexecutor.Request{
-		Model:   normalizedModel,
+		Model:   details.normalizedModel,
 		Payload: payload,
 	}
 	opts := coreexecutor.Options{
@@ -689,9 +706,9 @@ func (h *BaseAPIHandler) executeStreamWithAuthManager(ctx context.Context, handl
 		Headers:         headersFromContext(ctx),
 	}
 	opts.Metadata = reqMeta
-	streamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
+	streamResult, err := h.AuthManager.ExecuteStream(ctx, details.providers, req, opts)
 	if err != nil {
-		err = enrichAuthSelectionError(err, providers, normalizedModel)
+		err = enrichAuthSelectionError(err, details.providers, details.normalizedModel)
 		errChan := make(chan *interfaces.ErrorMessage, 1)
 		status := http.StatusInternalServerError
 		if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
@@ -793,7 +810,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManager(ctx context.Context, handl
 					if !sentPayload {
 						if bootstrapRetries < maxBootstrapRetries && bootstrapEligible(streamErr) {
 							bootstrapRetries++
-							retryResult, retryErr := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
+							retryResult, retryErr := h.AuthManager.ExecuteStream(ctx, details.providers, req, opts)
 							if retryErr == nil {
 								if passthroughHeadersEnabled {
 									replaceHeader(upstreamHeaders, FilterUpstreamHeaders(retryResult.Headers))
@@ -801,7 +818,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManager(ctx context.Context, handl
 								chunks = retryResult.Chunks
 								continue outer
 							}
-							streamErr = enrichAuthSelectionError(retryErr, providers, normalizedModel)
+							streamErr = enrichAuthSelectionError(retryErr, details.providers, details.normalizedModel)
 						}
 					}
 
@@ -884,6 +901,11 @@ func (h *BaseAPIHandler) getRequestDetails(modelName string) (providers []string
 }
 
 func (h *BaseAPIHandler) getRequestDetailsWithOptions(modelName string, allowImageModel bool) (providers []string, normalizedModel string, err *interfaces.ErrorMessage) {
+	details := h.getRequestDetailsForExecution(modelName, allowImageModel)
+	return details.providers, details.normalizedModel, details.err
+}
+
+func (h *BaseAPIHandler) getRequestDetailsForExecution(modelName string, allowImageModel bool) requestDetails {
 	resolvedModelName := modelName
 	initialSuffix := thinking.ParseSuffix(modelName)
 	if initialSuffix.ModelName == "auto" {
@@ -909,17 +931,35 @@ func (h *BaseAPIHandler) getRequestDetailsWithOptions(modelName string, allowIma
 	baseModel := strings.TrimSpace(parsed.ModelName)
 
 	if strings.EqualFold(routeModelBaseName(baseModel), "gpt-image-2") && !allowImageModel {
-		return nil, "", &interfaces.ErrorMessage{
+		return requestDetails{err: &interfaces.ErrorMessage{
 			StatusCode: http.StatusServiceUnavailable,
 			Error:      fmt.Errorf("model %s is only supported on /v1/images/generations and /v1/images/edits", routeModelBaseName(baseModel)),
-		}
+		}}
 	}
 
 	if h != nil && h.AuthManager != nil && h.AuthManager.HomeEnabled() {
-		return []string{"home"}, resolvedModelName, nil
+		return requestDetails{providers: []string{"home"}, normalizedModel: resolvedModelName}
 	}
 
-	providers = util.GetProviderName(baseModel)
+	if h != nil && h.AuthManager != nil {
+		resolved, errResolve := h.AuthManager.ResolveVirtualModel(resolvedModelName)
+		if errResolve != nil {
+			return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: errResolve}}
+		}
+		if resolved.Matched {
+			providers := providersFromVirtualTargets(resolved.Targets)
+			if len(providers) == 0 {
+				return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("virtual model %s has no valid providers", modelName)}}
+			}
+			return requestDetails{
+				providers:       providers,
+				normalizedModel: resolvedModelName,
+				virtualTargets:  resolved.Targets,
+			}
+		}
+	}
+
+	providers := util.GetProviderName(baseModel)
 	// Fallback: if baseModel has no provider but differs from resolvedModelName,
 	// try using the full model name. This handles edge cases where custom models
 	// may be registered with their full suffixed name (e.g., "my-model(8192)").
@@ -930,12 +970,32 @@ func (h *BaseAPIHandler) getRequestDetailsWithOptions(modelName string, allowIma
 	}
 
 	if len(providers) == 0 {
-		return nil, "", &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("unknown provider for model %s", modelName)}
+		return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("unknown provider for model %s", modelName)}}
 	}
 
 	// The thinking suffix is preserved in the model name itself, so no
 	// metadata-based configuration passing is needed.
-	return providers, resolvedModelName, nil
+	return requestDetails{providers: providers, normalizedModel: resolvedModelName}
+}
+
+func providersFromVirtualTargets(targets []routing.VirtualTarget) []string {
+	if len(targets) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		provider := strings.TrimSpace(strings.ToLower(target.Provider))
+		if provider == "" {
+			continue
+		}
+		if _, ok := seen[provider]; ok {
+			continue
+		}
+		seen[provider] = struct{}{}
+		out = append(out, provider)
+	}
+	return out
 }
 
 func routeModelBaseName(model string) string {

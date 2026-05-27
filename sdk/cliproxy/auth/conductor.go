@@ -20,6 +20,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/routing"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
@@ -402,6 +403,15 @@ func (m *Manager) HomeEnabled() bool {
 	}
 	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
 	return cfg != nil && cfg.Home.Enabled
+}
+
+// ResolveVirtualModel expands a requested model through the current virtual-model routing config.
+func (m *Manager) ResolveVirtualModel(model string) (routing.VirtualResolveResult, error) {
+	if m == nil {
+		return routing.VirtualResolveResult{}, nil
+	}
+	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
+	return routing.ResolveVirtualModel(cfg, model)
 }
 
 func (m *Manager) lookupAPIKeyUpstreamModel(authID, requestedModel string) string {
@@ -1262,6 +1272,9 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 	}
 
 	_, maxRetryCredentials, maxWait := m.retrySettings()
+	if targets := virtualTargetsFromMetadata(opts.Metadata); len(targets) > 0 {
+		return m.executeVirtualChain(ctx, targets, req, opts, maxRetryCredentials, maxWait)
+	}
 
 	var lastErr error
 	for attempt := 0; ; attempt++ {
@@ -1297,6 +1310,9 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 	}
 
 	_, maxRetryCredentials, maxWait := m.retrySettings()
+	if targets := virtualTargetsFromMetadata(opts.Metadata); len(targets) > 0 {
+		return m.executeVirtualChainCount(ctx, targets, req, opts, maxRetryCredentials, maxWait)
+	}
 
 	var lastErr error
 	for attempt := 0; ; attempt++ {
@@ -1328,6 +1344,9 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 	}
 
 	_, maxRetryCredentials, maxWait := m.retrySettings()
+	if targets := virtualTargetsFromMetadata(opts.Metadata); len(targets) > 0 {
+		return m.executeVirtualChainStream(ctx, targets, req, opts, maxRetryCredentials, maxWait)
+	}
 
 	var lastErr error
 	for attempt := 0; ; attempt++ {
@@ -1357,6 +1376,107 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 		return nil, lastErr
 	}
 	return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
+}
+
+func (m *Manager) executeVirtualChain(ctx context.Context, targets []routing.VirtualTarget, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, maxRetryCredentials int, maxWait time.Duration) (cliproxyexecutor.Response, error) {
+	var lastErr error
+	for _, target := range targets {
+		targetReq := req
+		targetReq.Model = target.Model
+		providers := []string{target.Provider}
+		for attempt := 0; ; attempt++ {
+			resp, errExec := m.executeMixedOnce(ctx, providers, targetReq, opts, maxRetryCredentials)
+			if errExec == nil {
+				return resp, nil
+			}
+			lastErr = errExec
+			wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, providers, targetReq.Model, maxWait)
+			if !shouldRetry {
+				break
+			}
+			if errWait := waitForCooldown(ctx, wait); errWait != nil {
+				return cliproxyexecutor.Response{}, errWait
+			}
+		}
+		if !shouldFallbackVirtualTarget(lastErr) {
+			return cliproxyexecutor.Response{}, lastErr
+		}
+	}
+	if lastErr != nil {
+		return cliproxyexecutor.Response{}, lastErr
+	}
+	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
+}
+
+func (m *Manager) executeVirtualChainCount(ctx context.Context, targets []routing.VirtualTarget, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, maxRetryCredentials int, maxWait time.Duration) (cliproxyexecutor.Response, error) {
+	var lastErr error
+	for _, target := range targets {
+		targetReq := req
+		targetReq.Model = target.Model
+		providers := []string{target.Provider}
+		for attempt := 0; ; attempt++ {
+			resp, errExec := m.executeCountMixedOnce(ctx, providers, targetReq, opts, maxRetryCredentials)
+			if errExec == nil {
+				return resp, nil
+			}
+			lastErr = errExec
+			wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, providers, targetReq.Model, maxWait)
+			if !shouldRetry {
+				break
+			}
+			if errWait := waitForCooldown(ctx, wait); errWait != nil {
+				return cliproxyexecutor.Response{}, errWait
+			}
+		}
+		if !shouldFallbackVirtualTarget(lastErr) {
+			return cliproxyexecutor.Response{}, lastErr
+		}
+	}
+	if lastErr != nil {
+		return cliproxyexecutor.Response{}, lastErr
+	}
+	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
+}
+
+func (m *Manager) executeVirtualChainStream(ctx context.Context, targets []routing.VirtualTarget, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, maxRetryCredentials int, maxWait time.Duration) (*cliproxyexecutor.StreamResult, error) {
+	var lastErr error
+	for _, target := range targets {
+		targetReq := req
+		targetReq.Model = target.Model
+		providers := []string{target.Provider}
+		for attempt := 0; ; attempt++ {
+			result, errStream := m.executeStreamMixedOnce(ctx, providers, targetReq, opts, maxRetryCredentials)
+			if errStream == nil {
+				return result, nil
+			}
+			lastErr = errStream
+			wait, shouldRetry := m.shouldRetryAfterError(errStream, attempt, providers, targetReq.Model, maxWait)
+			if !shouldRetry {
+				break
+			}
+			if errWait := waitForCooldown(ctx, wait); errWait != nil {
+				return nil, errWait
+			}
+		}
+		if !shouldFallbackVirtualTarget(lastErr) {
+			return nil, lastErr
+		}
+	}
+	if lastErr != nil {
+		var bootstrapErr *streamBootstrapError
+		if errors.As(lastErr, &bootstrapErr) && bootstrapErr != nil {
+			return streamErrorResult(bootstrapErr.Headers(), bootstrapErr.cause), nil
+		}
+		return nil, lastErr
+	}
+	return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
+}
+
+func shouldFallbackVirtualTarget(err error) bool {
+	if err == nil {
+		return false
+	}
+	return !isRequestInvalidError(err)
 }
 
 func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, maxRetryCredentials int) (cliproxyexecutor.Response, error) {
@@ -1702,6 +1822,30 @@ func hasRequestedModelMetadata(meta map[string]any) bool {
 	default:
 		return false
 	}
+}
+
+func virtualTargetsFromMetadata(meta map[string]any) []routing.VirtualTarget {
+	if len(meta) == 0 {
+		return nil
+	}
+	raw, ok := meta[cliproxyexecutor.VirtualTargetsMetadataKey]
+	if !ok || raw == nil {
+		return nil
+	}
+	targets, ok := raw.([]routing.VirtualTarget)
+	if !ok || len(targets) == 0 {
+		return nil
+	}
+	out := make([]routing.VirtualTarget, 0, len(targets))
+	for _, target := range targets {
+		target.Provider = strings.ToLower(strings.TrimSpace(target.Provider))
+		target.Model = strings.TrimSpace(target.Model)
+		if target.Provider == "" || target.Model == "" {
+			continue
+		}
+		out = append(out, target)
+	}
+	return out
 }
 
 type requestAuthPrepareLock struct {
