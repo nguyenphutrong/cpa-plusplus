@@ -95,6 +95,12 @@ type Config struct {
 	// Routing controls credential selection behavior.
 	Routing RoutingConfig `yaml:"routing" json:"routing"`
 
+	// VirtualModels maps client-facing bare model names to ordered concrete provider/model targets.
+	VirtualModels map[string]VirtualModelConfig `yaml:"virtual-models,omitempty" json:"virtual-models,omitempty"`
+
+	// ComboTemplates defines reusable ordered target chains for virtual models.
+	ComboTemplates map[string]ComboTemplateConfig `yaml:"combo-templates,omitempty" json:"combo-templates,omitempty"`
+
 	// WebsocketAuth enables or disables authentication for the WebSocket API.
 	WebsocketAuth bool `yaml:"ws-auth" json:"ws-auth"`
 
@@ -238,6 +244,59 @@ type RoutingConfig struct {
 	// SessionAffinityTTL specifies how long session-to-auth bindings are retained.
 	// Default: 1h. Accepts duration strings like "30m", "1h", "2h30m".
 	SessionAffinityTTL string `yaml:"session-affinity-ttl,omitempty" json:"session-affinity-ttl,omitempty"`
+
+	// VirtualModelsEnabled controls whether bare model names can resolve through virtual-model chains.
+	// Nil means enabled.
+	VirtualModelsEnabled *bool `yaml:"virtual-models-enabled,omitempty" json:"virtual-models-enabled,omitempty"`
+
+	// VirtualModelCacheTTL is reserved for short-lived resolver/listing caches.
+	// Default: 30s. Accepts duration strings like "30s" or "1m".
+	VirtualModelCacheTTL string `yaml:"virtual-model-cache-ttl,omitempty" json:"virtual-model-cache-ttl,omitempty"`
+
+	// MaxVirtualDepth limits nested virtual-model expansion. Default: 5.
+	MaxVirtualDepth int `yaml:"max-virtual-depth,omitempty" json:"max-virtual-depth,omitempty"`
+}
+
+// VirtualModelConfig defines an ordered fallback chain for a client-facing model.
+type VirtualModelConfig struct {
+	Enabled       *bool                `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	ComboTemplate string               `yaml:"combo-template,omitempty" json:"combo-template,omitempty"`
+	Targets       []VirtualModelTarget `yaml:"targets,omitempty" json:"targets,omitempty"`
+}
+
+// ComboTemplateConfig defines reusable virtual-model targets.
+type ComboTemplateConfig struct {
+	Enabled *bool                `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Targets []VirtualModelTarget `yaml:"targets,omitempty" json:"targets,omitempty"`
+}
+
+// VirtualModelTarget references either another bare virtual model or a concrete provider/model target.
+type VirtualModelTarget struct {
+	Target  string `yaml:"target" json:"target"`
+	Enabled *bool  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+}
+
+// UnmarshalYAML accepts both compact scalar targets and object targets.
+func (t *VirtualModelTarget) UnmarshalYAML(value *yaml.Node) error {
+	if t == nil || value == nil {
+		return nil
+	}
+	switch value.Kind {
+	case yaml.ScalarNode:
+		t.Target = strings.TrimSpace(value.Value)
+		return nil
+	case yaml.MappingNode:
+		type rawTarget VirtualModelTarget
+		var raw rawTarget
+		if err := value.Decode(&raw); err != nil {
+			return err
+		}
+		raw.Target = strings.TrimSpace(raw.Target)
+		*t = VirtualModelTarget(raw)
+		return nil
+	default:
+		return fmt.Errorf("virtual model target must be a string or mapping")
+	}
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.
@@ -740,6 +799,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// Normalize global OAuth model name aliases.
 	cfg.SanitizeOAuthModelAlias()
 
+	// Normalize virtual-model routing config.
+	cfg.SanitizeVirtualModels()
+
 	// Validate raw payload rules and drop invalid entries.
 	cfg.SanitizePayloadRules()
 
@@ -964,6 +1026,106 @@ func (cfg *Config) SanitizeGeminiKeys() {
 		out = append(out, entry)
 	}
 	cfg.GeminiKey = out
+}
+
+// VirtualModelsRoutingEnabled returns the effective global virtual-model routing flag.
+func (cfg *Config) VirtualModelsRoutingEnabled() bool {
+	if cfg == nil || cfg.Routing.VirtualModelsEnabled == nil {
+		return true
+	}
+	return *cfg.Routing.VirtualModelsEnabled
+}
+
+// EffectiveMaxVirtualDepth returns the configured virtual-model expansion depth.
+func (cfg *Config) EffectiveMaxVirtualDepth() int {
+	if cfg == nil || cfg.Routing.MaxVirtualDepth <= 0 {
+		return 5
+	}
+	return cfg.Routing.MaxVirtualDepth
+}
+
+// EffectiveVirtualModelCacheTTL returns the configured cache TTL for virtual-model views.
+func (cfg *Config) EffectiveVirtualModelCacheTTL() string {
+	if cfg == nil || strings.TrimSpace(cfg.Routing.VirtualModelCacheTTL) == "" {
+		return "30s"
+	}
+	return strings.TrimSpace(cfg.Routing.VirtualModelCacheTTL)
+}
+
+// SanitizeVirtualModels trims and drops empty virtual-model definitions.
+func (cfg *Config) SanitizeVirtualModels() {
+	if cfg == nil {
+		return
+	}
+	cfg.VirtualModels = sanitizeVirtualModelMap(cfg.VirtualModels)
+	cfg.ComboTemplates = sanitizeComboTemplateMap(cfg.ComboTemplates)
+	cfg.Routing.VirtualModelCacheTTL = strings.TrimSpace(cfg.Routing.VirtualModelCacheTTL)
+	if cfg.Routing.MaxVirtualDepth < 0 {
+		cfg.Routing.MaxVirtualDepth = 0
+	}
+}
+
+func sanitizeVirtualModelMap(entries map[string]VirtualModelConfig) map[string]VirtualModelConfig {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make(map[string]VirtualModelConfig, len(entries))
+	for name, entry := range entries {
+		key := strings.TrimSpace(name)
+		if key == "" {
+			continue
+		}
+		entry.ComboTemplate = strings.TrimSpace(entry.ComboTemplate)
+		entry.Targets = sanitizeVirtualModelTargets(entry.Targets)
+		if entry.ComboTemplate == "" && len(entry.Targets) == 0 {
+			continue
+		}
+		out[key] = entry
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func sanitizeComboTemplateMap(entries map[string]ComboTemplateConfig) map[string]ComboTemplateConfig {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make(map[string]ComboTemplateConfig, len(entries))
+	for name, entry := range entries {
+		key := strings.TrimSpace(name)
+		if key == "" {
+			continue
+		}
+		entry.Targets = sanitizeVirtualModelTargets(entry.Targets)
+		if len(entry.Targets) == 0 {
+			continue
+		}
+		out[key] = entry
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func sanitizeVirtualModelTargets(targets []VirtualModelTarget) []VirtualModelTarget {
+	if len(targets) == 0 {
+		return nil
+	}
+	out := make([]VirtualModelTarget, 0, len(targets))
+	for _, target := range targets {
+		target.Target = strings.TrimSpace(target.Target)
+		if target.Target == "" {
+			continue
+		}
+		out = append(out, target)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizeModelPrefix(prefix string) string {
