@@ -16,7 +16,6 @@ type RemoteManagement = internalconfig.RemoteManagement
 type AmpCode = internalconfig.AmpCode
 type OAuthModelAlias = internalconfig.OAuthModelAlias
 type VirtualModelConfig = internalconfig.VirtualModelConfig
-type ComboTemplateConfig = internalconfig.ComboTemplateConfig
 type VirtualModelTarget = internalconfig.VirtualModelTarget
 type PayloadConfig = internalconfig.PayloadConfig
 type PayloadRule = internalconfig.PayloadRule

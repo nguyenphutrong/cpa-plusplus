@@ -27,11 +27,8 @@ func TestVirtualModelsManagementPutGetPatch(t *testing.T) {
 		"enabled": true,
 		"cache_ttl": "45s",
 		"max_depth": 4,
-		"combo_templates": {
-			"default": {"targets": [{"target": "codex/gpt-5.1"}]}
-		},
 		"virtual_models": {
-			"fast": {"combo-template": "default", "targets": [{"target": "claude/claude-sonnet-4-5"}]}
+			"fast": {"targets": [{"target": "codex/gpt-5.1"}, {"target": "claude/claude-sonnet-4-5"}]}
 		}
 	}`
 	rec := performVirtualModelsRequest(h.PutVirtualModels, http.MethodPut, "/v0/management/virtual-models", putBody)
@@ -41,8 +38,11 @@ func TestVirtualModelsManagementPutGetPatch(t *testing.T) {
 	if got := h.cfg.EffectiveVirtualModelCacheTTL(); got != "45s" {
 		t.Fatalf("cache ttl = %q", got)
 	}
-	if got := h.cfg.VirtualModels["fast"].ComboTemplate; got != "default" {
-		t.Fatalf("combo template = %q", got)
+	if got := len(h.cfg.VirtualModels["fast"].Targets); got != 2 {
+		t.Fatalf("targets = %d", got)
+	}
+	if got := h.cfg.VirtualModels["fast"].Targets[0].Target; got != "codex/gpt-5.1" {
+		t.Fatalf("first target = %q", got)
 	}
 	if resolved, err := manager.ResolveVirtualModel("fast"); err != nil || !resolved.Matched {
 		t.Fatalf("manager virtual resolution = %#v err=%v", resolved, err)

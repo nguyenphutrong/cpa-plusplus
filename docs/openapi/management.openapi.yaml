@@ -1467,17 +1467,6 @@ components:
       properties:
         enabled:
           type: boolean
-        combo-template:
-          type: string
-        targets:
-          type: array
-          items:
-            $ref: "#/components/schemas/VirtualModelTarget"
-    ComboTemplateConfig:
-      type: object
-      properties:
-        enabled:
-          type: boolean
         targets:
           type: array
           items:
@@ -1497,10 +1486,6 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/VirtualModelConfig"
-        combo_templates:
-          type: object
-          additionalProperties:
-            $ref: "#/components/schemas/ComboTemplateConfig"
     VirtualModelAvailableTarget:
       type: object
       required: [provider, model, target]

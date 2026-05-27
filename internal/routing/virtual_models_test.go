@@ -63,13 +63,10 @@ func TestResolveVirtualModelBypassAndDisabled(t *testing.T) {
 	}
 }
 
-func TestResolveVirtualModelNestedAndTemplate(t *testing.T) {
+func TestResolveVirtualModelNested(t *testing.T) {
 	cfg := &config.Config{
-		ComboTemplates: map[string]config.ComboTemplateConfig{
-			"default": {Targets: []config.VirtualModelTarget{{Target: "gemini/gemini-2.5-pro"}}},
-		},
 		VirtualModels: map[string]config.VirtualModelConfig{
-			"primary":  {ComboTemplate: "default", Targets: []config.VirtualModelTarget{{Target: "fallback"}}},
+			"primary":  {Targets: []config.VirtualModelTarget{{Target: "gemini/gemini-2.5-pro"}, {Target: "fallback"}}},
 			"fallback": {Targets: []config.VirtualModelTarget{{Target: "claude/claude-sonnet-4-5(none)"}}},
 		},
 	}

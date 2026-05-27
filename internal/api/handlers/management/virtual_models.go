@@ -13,11 +13,10 @@ import (
 )
 
 type virtualModelsPayload struct {
-	Enabled        *bool                                 `json:"enabled"`
-	CacheTTL       string                                `json:"cache_ttl"`
-	MaxDepth       int                                   `json:"max_depth"`
-	VirtualModels  map[string]config.VirtualModelConfig  `json:"virtual_models"`
-	ComboTemplates map[string]config.ComboTemplateConfig `json:"combo_templates"`
+	Enabled       *bool                                `json:"enabled"`
+	CacheTTL      string                               `json:"cache_ttl"`
+	MaxDepth      int                                  `json:"max_depth"`
+	VirtualModels map[string]config.VirtualModelConfig `json:"virtual_models"`
 }
 
 // GetVirtualModels returns the virtual-model routing configuration.
@@ -25,11 +24,10 @@ func (h *Handler) GetVirtualModels(c *gin.Context) {
 	cfg := h.currentConfig()
 	payload := virtualModelsPayloadFromConfig(cfg)
 	c.JSON(http.StatusOK, gin.H{
-		"enabled":         cfg.VirtualModelsRoutingEnabled(),
-		"cache_ttl":       payload.CacheTTL,
-		"max_depth":       payload.MaxDepth,
-		"virtual_models":  payload.VirtualModels,
-		"combo_templates": payload.ComboTemplates,
+		"enabled":        cfg.VirtualModelsRoutingEnabled(),
+		"cache_ttl":      payload.CacheTTL,
+		"max_depth":      payload.MaxDepth,
+		"virtual_models": payload.VirtualModels,
 	})
 }
 
@@ -52,7 +50,6 @@ func (h *Handler) PutVirtualModels(c *gin.Context) {
 	next.Routing.VirtualModelCacheTTL = payload.CacheTTL
 	next.Routing.MaxVirtualDepth = payload.MaxDepth
 	next.VirtualModels = payload.VirtualModels
-	next.ComboTemplates = payload.ComboTemplates
 	next.SanitizeVirtualModels()
 	if err := validateVirtualModelsConfig(&next); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_virtual_models", "message": err.Error()})
@@ -63,7 +60,6 @@ func (h *Handler) PutVirtualModels(c *gin.Context) {
 	h.cfg.Routing.VirtualModelCacheTTL = next.Routing.VirtualModelCacheTTL
 	h.cfg.Routing.MaxVirtualDepth = next.Routing.MaxVirtualDepth
 	h.cfg.VirtualModels = next.VirtualModels
-	h.cfg.ComboTemplates = next.ComboTemplates
 	if h.authManager != nil {
 		h.authManager.SetConfig(h.cfg)
 	}
@@ -144,11 +140,10 @@ func (h *Handler) currentConfig() *config.Config {
 
 func virtualModelsPayloadFromConfig(cfg *config.Config) virtualModelsPayload {
 	return virtualModelsPayload{
-		Enabled:        cfg.Routing.VirtualModelsEnabled,
-		CacheTTL:       cfg.EffectiveVirtualModelCacheTTL(),
-		MaxDepth:       cfg.EffectiveMaxVirtualDepth(),
-		VirtualModels:  cfg.VirtualModels,
-		ComboTemplates: cfg.ComboTemplates,
+		Enabled:       cfg.Routing.VirtualModelsEnabled,
+		CacheTTL:      cfg.EffectiveVirtualModelCacheTTL(),
+		MaxDepth:      cfg.EffectiveMaxVirtualDepth(),
+		VirtualModels: cfg.VirtualModels,
 	}
 }
 

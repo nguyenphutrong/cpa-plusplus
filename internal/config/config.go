@@ -98,9 +98,6 @@ type Config struct {
 	// VirtualModels maps client-facing bare model names to ordered concrete provider/model targets.
 	VirtualModels map[string]VirtualModelConfig `yaml:"virtual-models,omitempty" json:"virtual-models,omitempty"`
 
-	// ComboTemplates defines reusable ordered target chains for virtual models.
-	ComboTemplates map[string]ComboTemplateConfig `yaml:"combo-templates,omitempty" json:"combo-templates,omitempty"`
-
 	// WebsocketAuth enables or disables authentication for the WebSocket API.
 	WebsocketAuth bool `yaml:"ws-auth" json:"ws-auth"`
 
@@ -259,13 +256,6 @@ type RoutingConfig struct {
 
 // VirtualModelConfig defines an ordered fallback chain for a client-facing model.
 type VirtualModelConfig struct {
-	Enabled       *bool                `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	ComboTemplate string               `yaml:"combo-template,omitempty" json:"combo-template,omitempty"`
-	Targets       []VirtualModelTarget `yaml:"targets,omitempty" json:"targets,omitempty"`
-}
-
-// ComboTemplateConfig defines reusable virtual-model targets.
-type ComboTemplateConfig struct {
 	Enabled *bool                `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Targets []VirtualModelTarget `yaml:"targets,omitempty" json:"targets,omitempty"`
 }
@@ -1058,7 +1048,6 @@ func (cfg *Config) SanitizeVirtualModels() {
 		return
 	}
 	cfg.VirtualModels = sanitizeVirtualModelMap(cfg.VirtualModels)
-	cfg.ComboTemplates = sanitizeComboTemplateMap(cfg.ComboTemplates)
 	cfg.Routing.VirtualModelCacheTTL = strings.TrimSpace(cfg.Routing.VirtualModelCacheTTL)
 	if cfg.Routing.MaxVirtualDepth < 0 {
 		cfg.Routing.MaxVirtualDepth = 0
@@ -1070,29 +1059,6 @@ func sanitizeVirtualModelMap(entries map[string]VirtualModelConfig) map[string]V
 		return nil
 	}
 	out := make(map[string]VirtualModelConfig, len(entries))
-	for name, entry := range entries {
-		key := strings.TrimSpace(name)
-		if key == "" {
-			continue
-		}
-		entry.ComboTemplate = strings.TrimSpace(entry.ComboTemplate)
-		entry.Targets = sanitizeVirtualModelTargets(entry.Targets)
-		if entry.ComboTemplate == "" && len(entry.Targets) == 0 {
-			continue
-		}
-		out[key] = entry
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func sanitizeComboTemplateMap(entries map[string]ComboTemplateConfig) map[string]ComboTemplateConfig {
-	if len(entries) == 0 {
-		return nil
-	}
-	out := make(map[string]ComboTemplateConfig, len(entries))
 	for name, entry := range entries {
 		key := strings.TrimSpace(name)
 		if key == "" {
@@ -1270,7 +1236,6 @@ func SaveConfigPreserveComments(configFile string, cfg *Config) error {
 	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-excluded-models")
 	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-model-alias")
 	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "virtual-models")
-	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "combo-templates")
 
 	// Merge generated into original in-place, preserving comments/order of existing nodes.
 	mergeMappingPreserve(original.Content[0], generated.Content[0])
