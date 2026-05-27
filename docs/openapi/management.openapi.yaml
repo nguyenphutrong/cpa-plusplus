@@ -922,6 +922,60 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/StatusOK"
+  /virtual-models:
+    get:
+      tags: [Models]
+      summary: Get virtual model routing configuration
+      responses:
+        "200":
+          description: Virtual model configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VirtualModelsPayload"
+    put:
+      tags: [Models]
+      summary: Replace virtual model routing configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VirtualModelsPayload"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/BadRequest"
+  /virtual-models/enabled:
+    patch:
+      tags: [Models]
+      summary: Toggle virtual model routing
+      requestBody:
+        $ref: "#/components/requestBodies/BooleanSetting"
+      responses:
+        "200":
+          $ref: "#/components/responses/StatusOK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /virtual-models/available-targets:
+    get:
+      tags: [Models]
+      summary: List concrete provider/model targets currently available
+      responses:
+        "200":
+          description: Available virtual model targets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  targets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/VirtualModelAvailableTarget"
 
   /oauth-excluded-models:
     $ref: "#/components/pathItems/DynamicConfigWithDelete"
@@ -1397,6 +1451,69 @@ components:
         - openai-compatibility
         - vertex
         - vertex-anthropic
+    VirtualModelTarget:
+      type: object
+      required: [target]
+      properties:
+        target:
+          type: string
+          description: Concrete `provider/model` target or another bare virtual model name.
+          example: codex/gpt-5.1
+        enabled:
+          type: boolean
+          description: When false, skip this target.
+    VirtualModelConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        combo-template:
+          type: string
+        targets:
+          type: array
+          items:
+            $ref: "#/components/schemas/VirtualModelTarget"
+    ComboTemplateConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        targets:
+          type: array
+          items:
+            $ref: "#/components/schemas/VirtualModelTarget"
+    VirtualModelsPayload:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        cache_ttl:
+          type: string
+          example: 30s
+        max_depth:
+          type: integer
+          example: 5
+        virtual_models:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/VirtualModelConfig"
+        combo_templates:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/ComboTemplateConfig"
+    VirtualModelAvailableTarget:
+      type: object
+      required: [provider, model, target]
+      properties:
+        provider:
+          type: string
+          example: codex
+        model:
+          type: string
+          example: gpt-5.1
+        target:
+          type: string
+          example: codex/gpt-5.1
     ProviderOAuthStartRequest:
       type: object
       required: [provider]

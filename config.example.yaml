@@ -113,6 +113,12 @@ quota-exceeded:
 # Routing strategy for selecting credentials when multiple match.
 routing:
   strategy: "round-robin" # round-robin (default), fill-first
+  # Enable virtual model routing for bare model names. Explicit provider/model requests bypass virtual routing.
+  virtual-models-enabled: true
+  # Short-lived cache hint for virtual model views.
+  virtual-model-cache-ttl: "30s"
+  # Maximum nested virtual model expansion depth.
+  max-virtual-depth: 5
   # Enable universal session-sticky routing for all clients.
   # Session IDs are extracted from: metadata.user_id (Claude Code session format),
   # X-Session-ID, Session_id (Codex), X-Amp-Thread-Id (Amp CLI),
@@ -121,6 +127,21 @@ routing:
   session-affinity: false # default: false
   # How long session-to-auth bindings are retained. Default: 1h
   session-affinity-ttl: "1h"
+
+# Reusable virtual model target chains. Targets use provider/model.
+# combo-templates:
+#   balanced:
+#     targets:
+#       - "codex/gpt-5.1"
+#       - "claude/claude-sonnet-4-5"
+
+# Virtual models only apply to bare model names such as "fast-agent".
+# Requests like "codex/fast-agent" or "claude/claude-sonnet-4-5" stay explicit and bypass this map.
+# virtual-models:
+#   fast-agent:
+#     combo-template: balanced
+#     targets:
+#       - "gemini/gemini-2.5-pro"
 
 # When true, enable authentication for the WebSocket API (/v1/ws).
 ws-auth: true

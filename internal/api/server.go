@@ -709,6 +709,10 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/routing/strategy", s.mgmt.GetRoutingStrategy)
 		mgmt.PUT("/routing/strategy", s.mgmt.PutRoutingStrategy)
 		mgmt.PATCH("/routing/strategy", s.mgmt.PutRoutingStrategy)
+		mgmt.GET("/virtual-models", s.mgmt.GetVirtualModels)
+		mgmt.PUT("/virtual-models", s.mgmt.PutVirtualModels)
+		mgmt.PATCH("/virtual-models/enabled", s.mgmt.PatchVirtualModelsEnabled)
+		mgmt.GET("/virtual-models/available-targets", s.mgmt.GetVirtualModelAvailableTargets)
 
 		mgmt.GET("/claude-api-key", s.mgmt.GetClaudeKeys)
 		mgmt.PUT("/claude-api-key", s.mgmt.PutClaudeKeys)
