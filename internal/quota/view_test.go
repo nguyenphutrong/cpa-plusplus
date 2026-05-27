@@ -72,6 +72,30 @@ func TestBuildQuotaViewUsesCachedQuotaData(t *testing.T) {
 	}
 }
 
+func TestBuildQuotaViewUsesCredentialKeyForGenericKiroLabel(t *testing.T) {
+	auth := &coreauth.Auth{
+		ID:       "kiro-aws-device-client-id.json",
+		Provider: "kiro",
+		Label:    "kiro",
+		Metadata: map[string]any{
+			MetadataKey: storage.QuotaData{
+				UpdatedAt: time.Now().UTC(),
+				ProviderData: &storage.ProviderQuotaData{
+					PlanType: "quota-unavailable",
+				},
+			},
+		},
+	}
+
+	view := BuildQuotaView([]*coreauth.Auth{auth}, testSupportsProvider)
+	if len(view.Providers) != 1 || len(view.Providers[0].Accounts) != 1 {
+		t.Fatalf("unexpected view shape: %#v", view)
+	}
+	if got := view.Providers[0].Accounts[0].AccountKey; got != "kiro-aws-device-client-id" {
+		t.Fatalf("account key = %q, want credential filename key", got)
+	}
+}
+
 func testSupportsProvider(provider string) bool {
 	return SupportsProvider(provider).Supported
 }

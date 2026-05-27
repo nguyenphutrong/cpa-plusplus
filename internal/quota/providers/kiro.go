@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	kiroauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota/storage"
 )
@@ -81,9 +82,6 @@ func (k *Kiro) Fetch(ctx context.Context, credential QuotaFetchInput) (storage.Q
 	profileARN := kiroauth.ResolveProfileARNForRequest(authMethod, profileARNInput)
 	region := kiroauth.ResolveRegionForRequest(profileARNInput, regionInput)
 	isDeviceCodeLike := isKiroProfileRequiredAuthMethod(authMethod)
-	if isDeviceCodeLike && strings.TrimSpace(profileARN) == "" {
-		return buildKiroQuotaUnavailableData("profileArn is missing for device authorization session"), nil
-	}
 	runAttempts := func(token string) (*kiroUsageAttemptResult, bool) {
 		results := k.fetchUsageAttempts(ctx, token, profileARN, region)
 		needRefresh := false
@@ -162,7 +160,7 @@ func (k *Kiro) Fetch(ctx context.Context, credential QuotaFetchInput) (storage.Q
 			}, nil
 		}
 		if isDeviceCodeLike && strings.TrimSpace(profileARN) == "" {
-			return buildKiroQuotaUnavailableData("missing profileArn for device_code/idc"), nil
+			return buildKiroQuotaUnavailableData("missing profileArn for device authorization session"), nil
 		}
 		return storage.QuotaData{}, fmt.Errorf("kiro quota upstream unavailable (forbidden): auth_method=%q profile_arn_sent=%t region=%q", authMethod, profileARN != "", region)
 	}
@@ -287,6 +285,7 @@ func (k *Kiro) fetchUsageGETCodeWhisperer(ctx context.Context, token, profileARN
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", kiroUsageUserAgent)
 	req.Header.Set("x-amz-user-agent", kiroUsageAmzUserAgent)
+	applyKiroUsageHeaders(req)
 
 	resp, err := k.client.Do(req)
 	if err != nil {
@@ -321,6 +320,7 @@ func (k *Kiro) fetchUsagePOSTCodeWhisperer(ctx context.Context, token, profileAR
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
 	req.Header.Set("x-amz-target", "AmazonCodeWhispererService.GetUsageLimits")
+	applyKiroUsageHeaders(req)
 	resp, err := k.client.Do(req)
 	if err != nil {
 		return kiroUsageAttemptResult{name: "codewhisperer-post", err: err}
@@ -356,6 +356,7 @@ func (k *Kiro) fetchUsageGETQEndpoint(ctx context.Context, token, profileARN, re
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
+	applyKiroUsageHeaders(req)
 	resp, err := k.client.Do(req)
 	if err != nil {
 		return kiroUsageAttemptResult{name: "q-get", err: err}
@@ -366,6 +367,19 @@ func (k *Kiro) fetchUsageGETQEndpoint(ctx context.Context, token, profileARN, re
 		return kiroUsageAttemptResult{name: "q-get", status: resp.StatusCode, err: err}
 	}
 	return kiroUsageAttemptResult{name: "q-get", status: resp.StatusCode, raw: raw}
+}
+
+func applyKiroUsageHeaders(req *http.Request) {
+	req.Header.Set("x-amzn-kiro-agent-mode", "vibe")
+	req.Header.Set("x-amzn-codewhisperer-optout", "true")
+	req.Header.Set("Amz-Sdk-Request", "attempt=1; max=3")
+	req.Header.Set("Amz-Sdk-Invocation-Id", uuid.NewString())
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", kiroUsageUserAgent)
+	}
+	if req.Header.Get("X-Amz-User-Agent") == "" {
+		req.Header.Set("X-Amz-User-Agent", kiroUsageAmzUserAgent)
+	}
 }
 
 func buildKiroQuotaUnavailableData(reason string) storage.QuotaData {

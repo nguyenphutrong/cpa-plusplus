@@ -121,7 +121,7 @@ func BuildQuotaView(auths []*coreauth.Auth, supportsRefresh func(provider string
 
 		quotaData := CachedQuotaData(auth)
 		capability := SupportsProvider(provider)
-		accountKey := firstNonEmpty(quotaAccountLabel(provider, quotaData), authAccountLabel(auth), auth.Label, auth.ID)
+		accountKey := firstNonEmpty(quotaAccountLabel(provider, quotaData), authAccountLabel(auth), nonGenericAuthLabel(provider, auth), authCredentialAccountKey(auth))
 		account := QuotaAccountView{
 			CredentialID:      auth.ID,
 			AccountKey:        accountKey,
@@ -270,6 +270,35 @@ func authAccountLabel(auth *coreauth.Auth) string {
 		}
 	}
 	return ""
+}
+
+func nonGenericAuthLabel(provider string, auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	label := strings.TrimSpace(auth.Label)
+	if label == "" {
+		return ""
+	}
+	normalizedLabel := strings.ToLower(strings.ReplaceAll(label, "_", "-"))
+	normalizedProvider := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(provider), "_", "-"))
+	switch normalizedLabel {
+	case normalizedProvider, normalizedProvider + "-account", normalizedProvider + "-aws-device", normalizedProvider + "-device":
+		return ""
+	default:
+		return label
+	}
+}
+
+func authCredentialAccountKey(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	key := strings.TrimSpace(auth.ID)
+	if key == "" {
+		key = strings.TrimSpace(auth.FileName)
+	}
+	return strings.TrimSuffix(key, ".json")
 }
 
 func providerDisplayName(provider string) string {
