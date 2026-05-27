@@ -125,23 +125,12 @@ func (r virtualResolver) expandVirtual(name string, depth int, visiting map[stri
 	visiting[name] = struct{}{}
 	defer delete(visiting, name)
 
-	rawTargets := make([]config.VirtualModelTarget, 0, len(entry.Targets))
-	if templateName := strings.TrimSpace(entry.ComboTemplate); templateName != "" {
-		template, okTemplate := r.cfg.ComboTemplates[templateName]
-		if !okTemplate {
-			return nil, fmt.Errorf("virtual model %q references unknown combo template %q", name, templateName)
-		}
-		if enabled(template.Enabled) {
-			rawTargets = append(rawTargets, template.Targets...)
-		}
-	}
-	rawTargets = append(rawTargets, entry.Targets...)
-	if len(rawTargets) == 0 {
+	if len(entry.Targets) == 0 {
 		return nil, fmt.Errorf("virtual model %q has no targets", name)
 	}
 
 	var out []VirtualTarget
-	for _, target := range rawTargets {
+	for _, target := range entry.Targets {
 		if !enabled(target.Enabled) {
 			continue
 		}

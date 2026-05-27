@@ -8,14 +8,10 @@ routing:
   virtual-models-enabled: false
   virtual-model-cache-ttl: "45s"
   max-virtual-depth: 3
-combo-templates:
-  default:
-    targets:
-      - codex/gpt-5.1
 virtual-models:
   fast:
-    combo-template: default
     targets:
+      - codex/gpt-5.1
       - target: claude/claude-sonnet-4-5
         enabled: false
 `))
@@ -31,10 +27,14 @@ virtual-models:
 	if got := cfg.EffectiveMaxVirtualDepth(); got != 3 {
 		t.Fatalf("EffectiveMaxVirtualDepth() = %d", got)
 	}
-	if got := cfg.ComboTemplates["default"].Targets[0].Target; got != "codex/gpt-5.1" {
-		t.Fatalf("template target = %q", got)
+	targets := cfg.VirtualModels["fast"].Targets
+	if len(targets) != 2 {
+		t.Fatalf("targets len = %d, want 2", len(targets))
 	}
-	target := cfg.VirtualModels["fast"].Targets[0]
+	if got := targets[0].Target; got != "codex/gpt-5.1" {
+		t.Fatalf("first target = %q", got)
+	}
+	target := targets[1]
 	if target.Target != "claude/claude-sonnet-4-5" {
 		t.Fatalf("virtual target = %q", target.Target)
 	}

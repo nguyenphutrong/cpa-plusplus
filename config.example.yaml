@@ -128,19 +128,14 @@ routing:
   # How long session-to-auth bindings are retained. Default: 1h
   session-affinity-ttl: "1h"
 
-# Reusable virtual model target chains. Targets use provider/model.
-# combo-templates:
-#   balanced:
+# Virtual models only apply to bare model names such as "fast-agent".
+# Requests like "codex/fast-agent" or "claude/claude-sonnet-4-5" stay explicit and bypass this map.
+# Targets use provider/model and are tried in order.
+# virtual-models:
+#   fast-agent:
 #     targets:
 #       - "codex/gpt-5.1"
 #       - "claude/claude-sonnet-4-5"
-
-# Virtual models only apply to bare model names such as "fast-agent".
-# Requests like "codex/fast-agent" or "claude/claude-sonnet-4-5" stay explicit and bypass this map.
-# virtual-models:
-#   fast-agent:
-#     combo-template: balanced
-#     targets:
 #       - "gemini/gemini-2.5-pro"
 
 # When true, enable authentication for the WebSocket API (/v1/ws).
