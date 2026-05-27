@@ -137,3 +137,53 @@ func TestGetRequestDetails_ImageModelReturns503(t *testing.T) {
 		t.Fatalf("unexpected error message: %q", msg)
 	}
 }
+
+func TestGetRequestDetails_VirtualModel(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	manager.SetConfig(&sdkconfig.Config{
+		VirtualModels: map[string]sdkconfig.VirtualModelConfig{
+			"fast": {
+				Targets: []sdkconfig.VirtualModelTarget{
+					{Target: "codex/gpt-5.1"},
+					{Target: "claude/claude-sonnet-4-5"},
+				},
+			},
+		},
+	})
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)
+
+	details := handler.getRequestDetailsForExecution("fast(high)", false)
+	if details.err != nil {
+		t.Fatalf("getRequestDetailsForExecution() error = %v", details.err)
+	}
+	if !reflect.DeepEqual(details.providers, []string{"codex", "claude"}) {
+		t.Fatalf("providers = %#v", details.providers)
+	}
+	if details.normalizedModel != "fast(high)" {
+		t.Fatalf("normalizedModel = %q", details.normalizedModel)
+	}
+	if len(details.virtualTargets) != 2 {
+		t.Fatalf("virtualTargets = %#v", details.virtualTargets)
+	}
+	if details.virtualTargets[0].Model != "gpt-5.1(high)" {
+		t.Fatalf("first target model = %q", details.virtualTargets[0].Model)
+	}
+}
+
+func TestGetRequestDetails_VirtualModelExplicitBypass(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	manager.SetConfig(&sdkconfig.Config{
+		VirtualModels: map[string]sdkconfig.VirtualModelConfig{
+			"fast": {Targets: []sdkconfig.VirtualModelTarget{{Target: "codex/gpt-5.1"}}},
+		},
+	})
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)
+
+	details := handler.getRequestDetailsForExecution("codex/fast", false)
+	if details.err == nil {
+		t.Fatal("expected unknown provider error for explicit bypass")
+	}
+	if len(details.virtualTargets) != 0 {
+		t.Fatalf("virtualTargets = %#v, want none", details.virtualTargets)
+	}
+}
