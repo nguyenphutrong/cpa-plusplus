@@ -414,6 +414,35 @@ func (m *Manager) ResolveVirtualModel(model string) (routing.VirtualResolveResul
 	return routing.ResolveVirtualModel(cfg, model)
 }
 
+// AvailableVirtualModelMaps returns client-facing virtual models backed by currently available targets.
+func (m *Manager) AvailableVirtualModelMaps() []map[string]any {
+	if m == nil {
+		return nil
+	}
+	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
+	infos := routing.AvailableVirtualModelInfos(cfg, registry.GetGlobalRegistry())
+	if len(infos) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(infos))
+	for _, info := range infos {
+		if info == nil || strings.TrimSpace(info.ID) == "" {
+			continue
+		}
+		model := map[string]any{
+			"id":       info.ID,
+			"object":   "model",
+			"owned_by": info.OwnedBy,
+			"type":     info.Type,
+		}
+		if info.DisplayName != "" {
+			model["display_name"] = info.DisplayName
+		}
+		out = append(out, model)
+	}
+	return out
+}
+
 func (m *Manager) lookupAPIKeyUpstreamModel(authID, requestedModel string) string {
 	if m == nil {
 		return ""

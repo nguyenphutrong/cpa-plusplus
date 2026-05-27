@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
 
 func boolPtr(v bool) *bool { return &v }
@@ -136,5 +137,26 @@ func TestResolveVirtualModelCycleDepthAndInvalidTarget(t *testing.T) {
 				t.Fatalf("error = %v, want contains %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestAvailableVirtualModelInfosRequiresAvailableTarget(t *testing.T) {
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient("virtual-list-codex", "codex", []*registry.ModelInfo{{ID: "gpt-5.1"}})
+	t.Cleanup(func() { reg.UnregisterClient("virtual-list-codex") })
+
+	cfg := &config.Config{
+		VirtualModels: map[string]config.VirtualModelConfig{
+			"available": {Targets: []config.VirtualModelTarget{{Target: "codex/gpt-5.1"}}},
+			"missing":   {Targets: []config.VirtualModelTarget{{Target: "claude/claude-missing"}}},
+		},
+	}
+
+	infos := AvailableVirtualModelInfos(cfg, reg)
+	if len(infos) != 1 {
+		t.Fatalf("infos = %#v, want one available virtual model", infos)
+	}
+	if infos[0].ID != "available" || infos[0].OwnedBy != "cpa-plusplus" || infos[0].Type != "virtual" {
+		t.Fatalf("info = %#v", infos[0])
 	}
 }

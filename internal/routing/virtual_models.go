@@ -2,9 +2,11 @@ package routing
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 )
 
@@ -53,6 +55,53 @@ func ResolveVirtualModel(cfg *config.Config, requestedModel string) (VirtualReso
 		return result, fmt.Errorf("virtual model %q has no enabled targets", baseModel)
 	}
 	return VirtualResolveResult{Matched: true, Model: baseModel, Targets: targets}, nil
+}
+
+// AvailableVirtualModelInfos returns virtual models with at least one available concrete target.
+func AvailableVirtualModelInfos(cfg *config.Config, reg *registry.ModelRegistry) []*registry.ModelInfo {
+	if cfg == nil || reg == nil || !cfg.VirtualModelsRoutingEnabled() || len(cfg.VirtualModels) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.VirtualModels))
+	for name := range cfg.VirtualModels {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make([]*registry.ModelInfo, 0, len(names))
+	for _, name := range names {
+		resolved, err := ResolveVirtualModel(cfg, name)
+		if err != nil || !resolved.Matched {
+			continue
+		}
+		if !hasAvailableVirtualTarget(reg, resolved.Targets) {
+			continue
+		}
+		out = append(out, &registry.ModelInfo{
+			ID:          name,
+			Object:      "model",
+			OwnedBy:     "cpa-plusplus",
+			Type:        "virtual",
+			DisplayName: name,
+		})
+	}
+	return out
+}
+
+func hasAvailableVirtualTarget(reg *registry.ModelRegistry, targets []VirtualTarget) bool {
+	for _, target := range targets {
+		provider := strings.TrimSpace(strings.ToLower(target.Provider))
+		model := strings.TrimSpace(thinking.ParseSuffix(target.Model).ModelName)
+		if provider == "" || model == "" {
+			continue
+		}
+		for _, availableProvider := range reg.GetModelProviders(model) {
+			if strings.EqualFold(availableProvider, provider) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type virtualResolver struct {
