@@ -133,7 +133,7 @@ func (h *Handler) startCallbackProviderOAuthSession(c *gin.Context, provider str
 
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
-	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req := httptest.NewRequest(http.MethodGet, pathWithQueryFlag(path, "is_webui", "true"), nil)
 	if c != nil && c.Request != nil {
 		req = req.WithContext(c.Request.Context())
 		req.Header = c.Request.Header.Clone()
@@ -180,6 +180,14 @@ func (h *Handler) startCallbackProviderOAuthSession(c *gin.Context, provider str
 	storeProviderOAuthSession(session)
 	go bridgeLegacyOAuthSession(session.ID, state, provider)
 	return providerOAuthSessionToResponse(session), nil
+}
+
+func pathWithQueryFlag(path, key, value string) string {
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + key + "=" + value
 }
 
 func callbackProviderOAuthStarter(h *Handler, provider string) (func(*gin.Context), string, bool) {

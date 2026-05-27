@@ -3,6 +3,8 @@ package management
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/antigravity"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/copilot"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -100,8 +103,10 @@ func TestStartProviderOAuthCodexReturnsCallbackSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	resetOAuthSessionsForTest(t)
 	resetProviderOAuthSessionsForTest(t)
+	resetCallbackForwardersForTest(t)
+	requireCallbackPortAvailable(t, codexCallbackPort)
 
-	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, coreauth.NewManager(nil, nil, nil))
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir(), Port: 8317}, coreauth.NewManager(nil, nil, nil))
 
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
@@ -129,6 +134,9 @@ func TestStartProviderOAuthCodexReturnsCallbackSession(t *testing.T) {
 	if legacyProvider != "codex" || legacyStatus != "" {
 		t.Fatalf("legacy session = (%q, %q), want codex pending", legacyProvider, legacyStatus)
 	}
+	if !callbackForwarderIsActive(codexCallbackPort, "codex") {
+		t.Fatalf("expected codex callback forwarder to be active")
+	}
 }
 
 func TestStartProviderOAuthAntigravityReturnsCallbackSession(t *testing.T) {
@@ -136,8 +144,10 @@ func TestStartProviderOAuthAntigravityReturnsCallbackSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	resetOAuthSessionsForTest(t)
 	resetProviderOAuthSessionsForTest(t)
+	resetCallbackForwardersForTest(t)
+	requireCallbackPortAvailable(t, antigravity.CallbackPort)
 
-	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, coreauth.NewManager(nil, nil, nil))
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir(), Port: 8317}, coreauth.NewManager(nil, nil, nil))
 
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
@@ -164,6 +174,9 @@ func TestStartProviderOAuthAntigravityReturnsCallbackSession(t *testing.T) {
 	}
 	if legacyProvider != "antigravity" || legacyStatus != "" {
 		t.Fatalf("legacy session = (%q, %q), want antigravity pending", legacyProvider, legacyStatus)
+	}
+	if !callbackForwarderIsActive(antigravity.CallbackPort, "antigravity") {
+		t.Fatalf("expected antigravity callback forwarder to be active")
 	}
 }
 
@@ -289,6 +302,41 @@ func resetProviderOAuthSessionsForTest(t *testing.T) {
 	orig := providerOAuthSessions
 	providerOAuthSessions = newProviderOAuthSessionStore()
 	t.Cleanup(func() { providerOAuthSessions = orig })
+}
+
+func resetCallbackForwardersForTest(t *testing.T) {
+	t.Helper()
+	callbackForwardersMu.Lock()
+	orig := callbackForwarders
+	callbackForwarders = make(map[int]*callbackForwarder)
+	callbackForwardersMu.Unlock()
+	t.Cleanup(func() {
+		callbackForwardersMu.Lock()
+		current := callbackForwarders
+		callbackForwarders = orig
+		callbackForwardersMu.Unlock()
+		for port, forwarder := range current {
+			stopForwarderInstance(port, forwarder)
+		}
+	})
+}
+
+func requireCallbackPortAvailable(t *testing.T, port int) {
+	t.Helper()
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Skipf("callback port %d is already in use: %v", port, err)
+	}
+	if errClose := ln.Close(); errClose != nil {
+		t.Fatalf("close callback port probe: %v", errClose)
+	}
+}
+
+func callbackForwarderIsActive(port int, provider string) bool {
+	callbackForwardersMu.Lock()
+	defer callbackForwardersMu.Unlock()
+	forwarder := callbackForwarders[port]
+	return forwarder != nil && forwarder.provider == provider
 }
 
 func waitForSavedAuth(t *testing.T, store *memoryAuthStore, id string) {
