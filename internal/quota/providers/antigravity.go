@@ -115,7 +115,7 @@ func (a *Antigravity) Fetch(ctx context.Context, input QuotaFetchInput) (storage
 	}
 
 	now := time.Now().UTC()
-	grouped := map[string]antigravityQuotaGroup{}
+	models := make([]storage.QuotaModel, 0, len(modelsResp.Models))
 	for modelName, modelInfo := range modelsResp.Models {
 		trimmedModel := strings.TrimSpace(modelName)
 		if trimmedModel == "" {
@@ -128,28 +128,16 @@ func (a *Antigravity) Fetch(ctx context.Context, input QuotaFetchInput) (storage
 		if modelInfo.QuotaInfo.RemainingFraction <= 0 && strings.TrimSpace(modelInfo.QuotaInfo.ResetTime) == "" {
 			continue
 		}
-		groupKey := antigravityQuotaGroupKey(trimmedModel)
-		if groupKey == "" {
+		if isIgnoredAntigravityQuotaModel(trimmedModel) {
 			continue
 		}
-		current := antigravityQuotaGroup{
-			remainingFraction: modelInfo.QuotaInfo.RemainingFraction,
-			resetTime:         strings.TrimSpace(modelInfo.QuotaInfo.ResetTime),
-		}
-		if existing, ok := grouped[groupKey]; !ok || antigravityPreferQuotaGroup(current, existing) {
-			grouped[groupKey] = current
-		}
-	}
-
-	models := make([]storage.QuotaModel, 0, len(grouped))
-	for groupKey, group := range grouped {
-		remainingPercent, usedPercent := quotaPercentPointers(group.remainingFraction * 100)
+		remainingPercent, usedPercent := quotaPercentPointers(modelInfo.QuotaInfo.RemainingFraction * 100)
 		models = append(models, storage.QuotaModel{
-			Name:             groupKey,
-			DisplayName:      antigravityQuotaDisplayName(groupKey),
+			Name:             trimmedModel,
+			DisplayName:      antigravityQuotaDisplayName(trimmedModel),
 			RemainingPercent: remainingPercent,
 			UsedPercent:      usedPercent,
-			ResetTime:        group.resetTime,
+			ResetTime:        strings.TrimSpace(modelInfo.QuotaInfo.ResetTime),
 			QuotaKind:        "window",
 			TimeBoundaryKind: "rolling",
 			DisplayUnit:      "percent",
@@ -350,61 +338,27 @@ func parseAntigravityProjectID(raw any) string {
 	}
 }
 
-type antigravityQuotaGroup struct {
-	remainingFraction float64
-	resetTime         string
-}
-
-func antigravityPreferQuotaGroup(candidate, existing antigravityQuotaGroup) bool {
-	if candidate.remainingFraction < existing.remainingFraction {
-		return true
-	}
-	if candidate.remainingFraction > existing.remainingFraction {
-		return false
-	}
-	return candidate.resetTime < existing.resetTime
-}
-
-func antigravityQuotaGroupKey(model string) string {
+func isIgnoredAntigravityQuotaModel(model string) bool {
 	lower := strings.ToLower(strings.TrimSpace(model))
 	lower = strings.ReplaceAll(lower, "_", "-")
-	switch {
-	case strings.HasPrefix(lower, "gemini-default"):
-		return ""
-	case strings.HasPrefix(lower, "gemini-3-pro"),
-		strings.HasPrefix(lower, "gemini-3.1-pro-high"),
-		strings.HasPrefix(lower, "gemini-3.1-pro-low"),
-		strings.HasPrefix(lower, "gemini-3.1-pro"),
-		strings.HasPrefix(lower, "gemini-2.5-pro"):
-		return "gemini-pro"
-	case strings.HasPrefix(lower, "gemini-3-flash"),
-		strings.HasPrefix(lower, "gemini-3.1-flash-lite"),
-		strings.HasPrefix(lower, "gemini-3.1-flash"),
-		strings.HasPrefix(lower, "gemini-3-pro-image"),
-		strings.HasPrefix(lower, "gemini-3-flash-image"),
-		strings.HasPrefix(lower, "gemini-3.1-pro-image"),
-		strings.HasPrefix(lower, "gemini-3.1-flash-image"),
-		strings.HasPrefix(lower, "gemini-2.5-flash"):
-		return "gemini-flash"
-	case strings.Contains(lower, "claude") && strings.Contains(lower, "opus"):
-		return "claude"
-	case strings.Contains(lower, "claude") && (strings.Contains(lower, "thinking") || strings.Contains(lower, "reasoning")):
-		return "claude"
-	case strings.Contains(lower, "claude") && strings.Contains(lower, "sonnet"):
-		return "claude"
-	}
-	return lower
+	return strings.HasPrefix(lower, "gemini-default")
 }
 
-func antigravityQuotaDisplayName(groupKey string) string {
-	switch groupKey {
-	case "gemini-pro":
-		return "Gemini Pro"
-	case "gemini-flash":
-		return "Gemini Flash"
-	case "claude":
-		return "Claude"
-	default:
-		return groupKey
+func antigravityQuotaDisplayName(model string) string {
+	trimmed := strings.TrimSpace(model)
+	lower := strings.ToLower(trimmed)
+	replacer := strings.NewReplacer("-", " ", "_", " ", ".", " ")
+	words := strings.Fields(replacer.Replace(lower))
+	for i, word := range words {
+		switch word {
+		case "gpt":
+			words[i] = "GPT"
+		default:
+			words[i] = strings.ToUpper(word[:1]) + word[1:]
+		}
 	}
+	if len(words) == 0 {
+		return trimmed
+	}
+	return strings.Join(words, " ")
 }

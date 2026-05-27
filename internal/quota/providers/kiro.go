@@ -80,9 +80,9 @@ func (k *Kiro) Fetch(ctx context.Context, credential QuotaFetchInput) (storage.Q
 	regionInput := inputString(credential, "region", "kiro_region")
 	profileARN := kiroauth.ResolveProfileARNForRequest(authMethod, profileARNInput)
 	region := kiroauth.ResolveRegionForRequest(profileARNInput, regionInput)
-	isDeviceCodeLike := strings.EqualFold(authMethod, "device_code") || strings.EqualFold(authMethod, "idc")
+	isDeviceCodeLike := isKiroProfileRequiredAuthMethod(authMethod)
 	if isDeviceCodeLike && strings.TrimSpace(profileARN) == "" {
-		return buildKiroQuotaUnavailableData("profileArn is missing for device_code/idc session"), nil
+		return buildKiroQuotaUnavailableData("profileArn is missing for device authorization session"), nil
 	}
 	runAttempts := func(token string) (*kiroUsageAttemptResult, bool) {
 		results := k.fetchUsageAttempts(ctx, token, profileARN, region)
@@ -381,6 +381,15 @@ func buildKiroQuotaUnavailableData(reason string) storage.QuotaData {
 			AccountLabel:    "",
 		},
 		Error: fmt.Sprintf("kiro_quota_profile_missing: %s", strings.TrimSpace(reason)),
+	}
+}
+
+func isKiroProfileRequiredAuthMethod(authMethod string) bool {
+	switch strings.ToLower(strings.TrimSpace(authMethod)) {
+	case "device_code", "idc", "aws-device", "aws_device", "builder_id_device":
+		return true
+	default:
+		return false
 	}
 }
 

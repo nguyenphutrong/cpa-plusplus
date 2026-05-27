@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota/storage"
 )
 
 func TestAntigravityFetchQuota(t *testing.T) {
@@ -53,13 +55,14 @@ func TestAntigravityFetchQuota(t *testing.T) {
 	if data.ProviderData.PlanType != "pro" {
 		t.Fatalf("plan type = %q", data.ProviderData.PlanType)
 	}
-	if len(data.ProviderData.Models) != 2 {
+	if len(data.ProviderData.Models) != 3 {
 		t.Fatalf("models len = %d", len(data.ProviderData.Models))
 	}
-	if got := data.ProviderData.Models[1].Name; got != "gemini-pro" {
-		t.Fatalf("grouped model = %q, want gemini-pro", got)
+	byName := antigravityModelsByName(data.ProviderData.Models)
+	if _, ok := byName["gemini-2.5-pro"]; !ok {
+		t.Fatalf("missing gemini-2.5-pro in models: %#v", byName)
 	}
-	if got := derefFloat(data.ProviderData.Models[1].RemainingPercent); !approxEqual(got, 60) {
+	if got := derefFloat(byName["gemini-2.5-pro-high"].RemainingPercent); !approxEqual(got, 60) {
 		t.Fatalf("remaining percent = %v, want 60", got)
 	}
 	if got := data.ProviderData.Models[0].QuotaKind; got != "window" {
@@ -200,45 +203,41 @@ func TestAntigravityFetchQuotaGroupsModelFamilies(t *testing.T) {
 	}
 
 	models := data.ProviderData.Models
-	if len(models) != 3 {
-		t.Fatalf("models len = %d, want 3", len(models))
+	if len(models) != 9 {
+		t.Fatalf("models len = %d, want 9", len(models))
 	}
 
-	byName := map[string]struct {
-		display   string
-		remaining float64
-	}{}
-	for _, model := range models {
-		byName[model.Name] = struct {
-			display   string
-			remaining float64
-		}{
-			display:   model.DisplayName,
-			remaining: derefFloat(model.RemainingPercent),
-		}
-	}
+	byName := antigravityModelsByName(models)
 
-	if got := byName["gemini-pro"].remaining; !approxEqual(got, 22) {
+	if got := derefFloat(byName["gemini-3.1-pro-low"].RemainingPercent); !approxEqual(got, 22) {
 		t.Fatalf("gemini-pro remaining = %v, want 22", got)
 	}
-	if got := byName["gemini-flash"].remaining; !approxEqual(got, 21) {
+	if got := derefFloat(byName["gemini-3.1-flash-image"].RemainingPercent); !approxEqual(got, 21) {
 		t.Fatalf("gemini-flash remaining = %v, want 21", got)
 	}
-	if got := byName["claude"].remaining; !approxEqual(got, 29) {
+	if got := derefFloat(byName["claude-sonnet-4-5-thinking"].RemainingPercent); !approxEqual(got, 29) {
 		t.Fatalf("claude remaining = %v, want 29", got)
 	}
-	if got := byName["gemini-pro"].display; got != "Gemini Pro" {
-		t.Fatalf("display = %q, want Gemini Pro", got)
+	if got := byName["gemini-3-pro"].DisplayName; got != "Gemini 3 Pro" {
+		t.Fatalf("display = %q, want Gemini 3 Pro", got)
 	}
-	if got := byName["gemini-flash"].display; got != "Gemini Flash" {
-		t.Fatalf("display = %q, want Gemini Flash", got)
+	if got := byName["gemini-3-flash"].DisplayName; got != "Gemini 3 Flash" {
+		t.Fatalf("display = %q, want Gemini 3 Flash", got)
 	}
-	if got := byName["claude"].display; got != "Claude" {
-		t.Fatalf("display = %q, want Claude", got)
+	if got := byName["claude-sonnet-4-5"].DisplayName; got != "Claude Sonnet 4 5" {
+		t.Fatalf("display = %q, want Claude Sonnet 4 5", got)
 	}
 	if _, exists := byName["gemini-default"]; exists {
 		t.Fatal("gemini-default should be filtered out")
 	}
+}
+
+func antigravityModelsByName(models []storage.QuotaModel) map[string]storage.QuotaModel {
+	byName := make(map[string]storage.QuotaModel, len(models))
+	for _, model := range models {
+		byName[model.Name] = model
+	}
+	return byName
 }
 
 func derefFloat(v *float64) float64 {
