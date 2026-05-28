@@ -120,6 +120,7 @@ func tryRefreshModels(ctx context.Context, label string) {
 		log.Warnf("%s: fetch failed from all URLs, keeping current data", label)
 		return
 	}
+	mergeLocalOnlyModelSections(parsed, oldData)
 
 	// Detect changes before updating store.
 	changed := detectChangedProviders(oldData, parsed)
@@ -215,6 +216,8 @@ func detectChangedProviders(oldData, newData *staticModelsJSON) []string {
 		{"codex", oldData.CodexPro, newData.CodexPro},
 		{"kimi", oldData.Kimi, newData.Kimi},
 		{"antigravity", oldData.Antigravity, newData.Antigravity},
+		{"github-copilot", oldData.GitHubCopilot, newData.GitHubCopilot},
+		{"kiro", oldData.Kiro, newData.Kiro},
 		{"xai", oldData.XAI, newData.XAI},
 	}
 
@@ -230,6 +233,18 @@ func detectChangedProviders(oldData, newData *staticModelsJSON) []string {
 		}
 	}
 	return changed
+}
+
+func mergeLocalOnlyModelSections(remote, fallback *staticModelsJSON) {
+	if remote == nil || fallback == nil {
+		return
+	}
+	if len(remote.GitHubCopilot) == 0 && len(fallback.GitHubCopilot) > 0 {
+		remote.GitHubCopilot = cloneModelInfos(fallback.GitHubCopilot)
+	}
+	if len(remote.Kiro) == 0 && len(fallback.Kiro) > 0 {
+		remote.Kiro = cloneModelInfos(fallback.Kiro)
+	}
 }
 
 // modelSectionChanged reports whether two model slices differ.

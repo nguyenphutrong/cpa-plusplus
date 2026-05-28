@@ -58,6 +58,42 @@ func TestValidateModelsCatalogAllowsMissingSections(t *testing.T) {
 	}
 }
 
+func TestMergeLocalOnlyModelSectionsPreservesForkModels(t *testing.T) {
+	fallback := validTestModelsCatalog()
+	fallback.GitHubCopilot = []*ModelInfo{{ID: "copilot-model"}}
+	fallback.Kiro = []*ModelInfo{{ID: "kiro-model"}}
+	remote := validTestModelsCatalog()
+	remote.GitHubCopilot = nil
+	remote.Kiro = nil
+
+	mergeLocalOnlyModelSections(remote, fallback)
+
+	if findModelInfo(remote.GitHubCopilot, "copilot-model") == nil {
+		t.Fatalf("github-copilot fallback not preserved: %#v", remote.GitHubCopilot)
+	}
+	if findModelInfo(remote.Kiro, "kiro-model") == nil {
+		t.Fatalf("kiro fallback not preserved: %#v", remote.Kiro)
+	}
+}
+
+func TestDetectChangedProvidersIncludesForkModelSections(t *testing.T) {
+	oldData := validTestModelsCatalog()
+	newData := validTestModelsCatalog()
+	oldData.GitHubCopilot = []*ModelInfo{{ID: "copilot-old"}}
+	newData.GitHubCopilot = []*ModelInfo{{ID: "copilot-new"}}
+	oldData.Kiro = []*ModelInfo{{ID: "kiro-old"}}
+	newData.Kiro = []*ModelInfo{{ID: "kiro-new"}}
+
+	changed := detectChangedProviders(oldData, newData)
+
+	if !stringSliceContains(changed, "github-copilot") {
+		t.Fatalf("changed providers missing github-copilot: %#v", changed)
+	}
+	if !stringSliceContains(changed, "kiro") {
+		t.Fatalf("changed providers missing kiro: %#v", changed)
+	}
+}
+
 func TestValidateModelsCatalogRejectsInvalidDefinitions(t *testing.T) {
 	data := validTestModelsCatalog()
 	data.Claude = []*ModelInfo{{ID: ""}}
@@ -70,18 +106,20 @@ func TestValidateModelsCatalogRejectsInvalidDefinitions(t *testing.T) {
 func validTestModelsCatalog() *staticModelsJSON {
 	models := []*ModelInfo{{ID: "test-model"}}
 	return &staticModelsJSON{
-		Claude:      models,
-		Gemini:      models,
-		Vertex:      models,
-		GeminiCLI:   models,
-		AIStudio:    models,
-		CodexFree:   models,
-		CodexTeam:   models,
-		CodexPlus:   models,
-		CodexPro:    models,
-		Kimi:        models,
-		Antigravity: models,
-		XAI:         models,
+		Claude:        models,
+		Gemini:        models,
+		Vertex:        models,
+		GeminiCLI:     models,
+		AIStudio:      models,
+		CodexFree:     models,
+		CodexTeam:     models,
+		CodexPlus:     models,
+		CodexPro:      models,
+		Kimi:          models,
+		Antigravity:   models,
+		GitHubCopilot: models,
+		Kiro:          models,
+		XAI:           models,
 	}
 }
 
@@ -143,4 +181,13 @@ func assertGPT55ModelInfo(t *testing.T, source string, model *ModelInfo) {
 			t.Fatalf("%s thinking level %d mismatch: got %q, want %q", source, i, model.Thinking.Levels[i], level)
 		}
 	}
+}
+
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
