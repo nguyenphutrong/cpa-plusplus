@@ -492,6 +492,59 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ProviderResponse"
+  /models/catalog:
+    get:
+      tags: [Models]
+      summary: List provider model catalog rows
+      description: Returns configured provider groups and their current model rows for the Models screen. Secrets and raw tokens are never included.
+      responses:
+        "200":
+          description: Provider model catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelCatalogResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /providers/{provider}/enabled-models:
+    get:
+      tags: [Providers, Models]
+      summary: Get enabled models for a provider
+      description: `enabled_models: null` means all catalog models for the provider are enabled. An array is an explicit allowlist.
+      parameters:
+        - $ref: "#/components/parameters/ProviderPath"
+      responses:
+        "200":
+          description: Provider enabled-model allowlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnabledModelsResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Providers, Models]
+      summary: Replace enabled models for a provider
+      description: Persists an enabled-model facade over the existing excluded-model storage. `enabled_models: null` clears the allowlist so all catalog models are enabled.
+      parameters:
+        - $ref: "#/components/parameters/ProviderPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnabledModelsRequest"
+      responses:
+        "200":
+          description: Updated provider enabled-model allowlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnabledModelsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /providers/{id}:
     get:
       tags: [Providers]
@@ -569,12 +622,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderSyncSummary"
-  /providers/{id}/models/sync:
+  /providers/{provider}/models/sync:
     post:
       tags: [Providers, Models]
       summary: Sync provider model inventory
+      description: Refreshes live model inventory for providers that support discovery. Unsupported providers return a clear error rather than fake success.
       parameters:
-        - $ref: "#/components/parameters/ProviderID"
+        - $ref: "#/components/parameters/ProviderPath"
       responses:
         "200":
           description: Provider model sync summary
@@ -582,6 +636,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderSyncSummary"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "501":
+          description: Provider does not support live model sync
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          $ref: "#/components/responses/BadGateway"
 
   /auth-files:
     get:
@@ -1606,6 +1670,11 @@ components:
           type: array
           items:
             type: string
+        supported_models:
+          type: array
+          description: Provider-local model IDs currently registered for this credential.
+          items:
+            type: string
         validation:
           $ref: "#/components/schemas/ProviderValidation"
     ProviderPatchRequest:
@@ -1672,7 +1741,127 @@ components:
           type: array
           items:
             type: string
+        models_count:
+          type: integer
       additionalProperties: true
+    EnabledModelsRequest:
+      type: object
+      properties:
+        enabled_models:
+          oneOf:
+            - type: "null"
+            - type: array
+              items:
+                type: string
+          description: Null enables every catalog model. An array is an explicit provider-local allowlist.
+        models:
+          oneOf:
+            - type: "null"
+            - type: array
+              items:
+                type: string
+          deprecated: true
+          description: Compatibility alias for `enabled_models`.
+    EnabledModelsResponse:
+      type: object
+      required: [provider_id, enabled_models]
+      properties:
+        success:
+          type: boolean
+        provider_id:
+          $ref: "#/components/schemas/ProviderID"
+        enabled_models:
+          oneOf:
+            - type: "null"
+            - type: array
+              items:
+                type: string
+          description: Null means all catalog models are enabled.
+        catalog_models:
+          type: array
+          items:
+            type: string
+        connection_count:
+          type: integer
+    ModelCatalogResponse:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelCatalogProvider"
+    ModelCatalogProvider:
+      type: object
+      required: [provider_id, provider_name, connection_count, status, models]
+      properties:
+        provider_id:
+          $ref: "#/components/schemas/ProviderID"
+        provider_name:
+          type: string
+        type:
+          type: string
+          enum: [oauth, api_key]
+        connection_count:
+          type: integer
+        status:
+          type: string
+          enum: [active, disabled, unavailable]
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelCatalogItem"
+    ModelCatalogItem:
+      type: object
+      required: [id, model_id, provider, available, live_discovered, is_enabled]
+      properties:
+        id:
+          type: string
+          description: Client-facing provider/model identifier.
+        model_id:
+          type: string
+          description: Provider-local model identifier.
+        object:
+          type: string
+        created:
+          type: integer
+          format: int64
+        owned_by:
+          type: string
+        provider:
+          $ref: "#/components/schemas/ProviderID"
+        type:
+          type: string
+        display_name:
+          type: string
+        name:
+          type: string
+        context_window:
+          type: integer
+        max_output_tokens:
+          type: integer
+        available:
+          type: boolean
+        capabilities:
+          type: object
+          additionalProperties:
+            type: boolean
+        metadata_source:
+          type: string
+          enum: [live, static, config]
+        live_discovered:
+          type: boolean
+        fetched_at:
+          type: string
+          format: date-time
+        warnings:
+          type: array
+          items:
+            type: string
+        account_identity:
+          type: string
+        is_enabled:
+          type: boolean
     QuotaView:
       type: object
       properties:

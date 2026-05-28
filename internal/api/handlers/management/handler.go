@@ -3,6 +3,7 @@
 package management
 
 import (
+	"context"
 	"crypto/subtle"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/buildinfo"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"golang.org/x/crypto/bcrypt"
@@ -25,6 +27,10 @@ type attemptInfo struct {
 	blockedUntil time.Time
 	lastActivity time.Time // track last activity for cleanup
 }
+
+// ProviderModelSyncer refreshes one provider credential's model inventory and
+// returns the models currently registered for that credential.
+type ProviderModelSyncer func(context.Context, *coreauth.Auth) (*coreauth.Auth, []*registry.ModelInfo, error)
 
 // attemptCleanupInterval controls how often stale IP entries are purged
 const attemptCleanupInterval = 1 * time.Hour
@@ -46,6 +52,7 @@ type Handler struct {
 	envSecret           string
 	logDir              string
 	postAuthHook        coreauth.PostAuthHook
+	providerModelSyncer ProviderModelSyncer
 }
 
 // NewHandler creates a new management handler instance.
@@ -140,6 +147,11 @@ func (h *Handler) SetLogDirectory(dir string) {
 // SetPostAuthHook registers a hook to be called after auth record creation but before persistence.
 func (h *Handler) SetPostAuthHook(hook coreauth.PostAuthHook) {
 	h.postAuthHook = hook
+}
+
+// SetProviderModelSyncer registers the service-level live model sync callback.
+func (h *Handler) SetProviderModelSyncer(syncer ProviderModelSyncer) {
+	h.providerModelSyncer = syncer
 }
 
 // Middleware enforces access control for management endpoints.

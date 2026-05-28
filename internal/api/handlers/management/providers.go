@@ -155,13 +155,32 @@ func (h *Handler) RefreshProvider(c *gin.Context) {
 
 func (h *Handler) SyncProviderModels(c *gin.Context) {
 	providerParam := firstProviderNonEmpty(c.Param("provider"), c.Param("id"))
-	provider, err := NormalizeOAuthProvider(providerParam)
+	auth, ref, ok := h.findProviderAuthForManagementProvider(providerParam)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "provider credential not found", "provider": strings.TrimSpace(providerParam)})
+		return
+	}
+	if h.providerModelSyncer == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": fmt.Sprintf("model sync is not supported for provider %q", ref.Public), "provider": ref.Public})
+		return
+	}
+	updated, models, err := h.providerModelSyncer(c.Request.Context(), auth)
 	if err != nil {
-		provider = strings.TrimSpace(providerParam)
+		status := http.StatusBadGateway
+		if strings.Contains(strings.ToLower(err.Error()), "not supported") {
+			status = http.StatusNotImplemented
+		}
+		c.JSON(status, gin.H{"error": err.Error(), "provider": ref.Public})
+		return
+	}
+	if updated == nil {
+		updated = auth
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"provider":   provider,
-		"checked_at": time.Now().UTC().Format(time.RFC3339),
+		"provider":         ref.Public,
+		"checked_at":       time.Now().UTC().Format(time.RFC3339),
+		"supported_models": modelIDsFromRegistryModels(ref.Public, updated.Provider, models),
+		"models_count":     len(models),
 	})
 }
 
@@ -226,21 +245,54 @@ func (h *Handler) findProviderAuth(id string) (*coreauth.Auth, bool) {
 	return nil, false
 }
 
+func (h *Handler) findProviderAuthForManagementProvider(provider string) (*coreauth.Auth, managementProviderRef, bool) {
+	if h == nil || h.authManager == nil {
+		return nil, managementProviderRef{}, false
+	}
+	if auth, ok := h.findProviderAuth(provider); ok {
+		ref := managementProviderRefFromAuth(auth)
+		if ref.Public == "" {
+			ref.Public = strings.ToLower(strings.TrimSpace(provider))
+			ref.StorageKeys = []string{ref.Public}
+		}
+		return auth, ref, true
+	}
+	ref, err := normalizeManagementProvider(provider)
+	if err != nil {
+		return nil, managementProviderRef{}, false
+	}
+	var fallback *coreauth.Auth
+	for _, auth := range h.authManager.List() {
+		if !authMatchesManagementProvider(auth, ref) {
+			continue
+		}
+		if providerAuthAvailable(auth) {
+			return auth, ref, true
+		}
+		if fallback == nil {
+			fallback = auth
+		}
+	}
+	if fallback != nil {
+		return fallback, ref, true
+	}
+	return nil, ref, false
+}
+
 func (h *Handler) providerResponseFromAuth(auth *coreauth.Auth) gin.H {
 	if auth == nil {
 		return nil
 	}
-	provider := strings.TrimSpace(auth.Provider)
-	if provider == "" {
-		provider = strings.TrimSpace(authAttribute(auth, "provider"))
-	}
+	provider := publicProviderFromAuth(auth)
 	label := strings.TrimSpace(auth.Label)
 	if label == "" {
 		label = strings.TrimSpace(auth.FileName)
 	}
+	supportedModels := providerSupportedModelIDs(auth)
 	validation := gin.H{
-		"valid":     !auth.Disabled && auth.Status != coreauth.StatusDisabled && !auth.Unavailable,
-		"auth_type": "oauth",
+		"valid":            !auth.Disabled && auth.Status != coreauth.StatusDisabled && !auth.Unavailable,
+		"auth_type":        "oauth",
+		"supported_models": supportedModels,
 	}
 	if account := providerAccountIdentity(auth); account != "" {
 		validation["account_identity"] = account
@@ -252,17 +304,18 @@ func (h *Handler) providerResponseFromAuth(auth *coreauth.Auth) gin.H {
 		validation["warnings"] = []string{auth.StatusMessage}
 	}
 	out := gin.H{
-		"id":         auth.ID,
-		"type":       "oauth",
-		"provider":   provider,
-		"label":      label,
-		"disabled":   auth.Disabled || auth.Status == coreauth.StatusDisabled,
-		"secret":     "",
-		"priority":   providerPriority(auth),
-		"prefix":     auth.Prefix,
-		"proxy_url":  auth.ProxyURL,
-		"headers":    coreauth.ExtractCustomHeadersFromMetadata(auth.Metadata),
-		"validation": validation,
+		"id":               auth.ID,
+		"type":             "oauth",
+		"provider":         provider,
+		"label":            label,
+		"disabled":         auth.Disabled || auth.Status == coreauth.StatusDisabled,
+		"secret":           "",
+		"priority":         providerPriority(auth),
+		"prefix":           auth.Prefix,
+		"proxy_url":        auth.ProxyURL,
+		"headers":          coreauth.ExtractCustomHeadersFromMetadata(auth.Metadata),
+		"supported_models": supportedModels,
+		"validation":       validation,
 	}
 	if projectID := authProjectID(auth); projectID != "" {
 		out["project_id"] = projectID

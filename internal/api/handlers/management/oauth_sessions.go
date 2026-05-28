@@ -234,11 +234,11 @@ func ValidateOAuthState(state string) error {
 
 func NormalizeOAuthProvider(provider string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "anthropic", "claude":
+	case "anthropic", "claude", "claude-code":
 		return "anthropic", nil
 	case "codex", "openai":
 		return "codex", nil
-	case "gemini", "google":
+	case "gemini", "gemini-cli", "google":
 		return "gemini", nil
 	case "antigravity", "anti-gravity":
 		return "antigravity", nil

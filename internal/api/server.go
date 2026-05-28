@@ -59,6 +59,7 @@ type serverOptionConfig struct {
 	keepAliveTimeout     time.Duration
 	keepAliveOnTimeout   func()
 	postAuthHook         auth.PostAuthHook
+	providerModelSyncer  managementHandlers.ProviderModelSyncer
 }
 
 // ServerOption customises HTTP server construction.
@@ -123,6 +124,13 @@ func WithRequestLoggerFactory(factory func(*config.Config, string) logging.Reque
 func WithPostAuthHook(hook auth.PostAuthHook) ServerOption {
 	return func(cfg *serverOptionConfig) {
 		cfg.postAuthHook = hook
+	}
+}
+
+// WithProviderModelSyncer wires management model-sync endpoints to the service model inventory refresh path.
+func WithProviderModelSyncer(syncer managementHandlers.ProviderModelSyncer) ServerOption {
+	return func(cfg *serverOptionConfig) {
+		cfg.providerModelSyncer = syncer
 	}
 }
 
@@ -286,6 +294,9 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	s.mgmt.SetLogDirectory(logDir)
 	if optionState.postAuthHook != nil {
 		s.mgmt.SetPostAuthHook(optionState.postAuthHook)
+	}
+	if optionState.providerModelSyncer != nil {
+		s.mgmt.SetProviderModelSyncer(optionState.providerModelSyncer)
 	}
 	s.localPassword = optionState.localPassword
 
@@ -746,6 +757,7 @@ func (s *Server) registerManagementRoutes() {
 
 		mgmt.GET("/auth-files", s.mgmt.ListAuthFiles)
 		mgmt.GET("/auth-files/models", s.mgmt.GetAuthFileModels)
+		mgmt.GET("/models/catalog", s.mgmt.GetModelCatalog)
 		mgmt.GET("/model-definitions/:channel", s.mgmt.GetStaticModelDefinitions)
 		mgmt.GET("/auth-files/download", s.mgmt.DownloadAuthFile)
 		mgmt.POST("/auth-files", s.mgmt.UploadAuthFile)
@@ -759,6 +771,8 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/providers/oauth/sessions/:sessionID", s.mgmt.GetProviderOAuthSession)
 		mgmt.DELETE("/providers/oauth/sessions/:sessionID", s.mgmt.DeleteProviderOAuthSession)
 		mgmt.GET("/providers", s.mgmt.ListProviders)
+		mgmt.GET("/providers/:id/enabled-models", s.mgmt.GetProviderEnabledModels)
+		mgmt.PUT("/providers/:id/enabled-models", s.mgmt.PutProviderEnabledModels)
 		mgmt.POST("/providers/:id/refresh", s.mgmt.RefreshProvider)
 		mgmt.POST("/providers/:id/sync", s.mgmt.SyncProviderModels)
 		mgmt.POST("/providers/:id/models/sync", s.mgmt.SyncProviderModels)
