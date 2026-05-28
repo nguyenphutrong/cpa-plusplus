@@ -825,7 +825,9 @@ func (s *Service) Run(ctx context.Context) error {
 	// legacy clients removed; no caches to refresh
 
 	// handlers no longer depend on legacy clients; pass nil slice initially
-	s.server = api.NewServer(s.cfg, s.coreManager, s.accessManager, s.configPath, s.serverOptions...)
+	serverOptions := append([]api.ServerOption(nil), s.serverOptions...)
+	serverOptions = append(serverOptions, api.WithProviderModelSyncer(s.syncProviderModelsFromManagement))
+	s.server = api.NewServer(s.cfg, s.coreManager, s.accessManager, s.configPath, serverOptions...)
 
 	if s.authManager == nil {
 		s.authManager = newDefaultAuthManager()
@@ -1350,6 +1352,39 @@ func (s *Service) latestAuthForModelRegistration(authID string) (*coreauth.Auth,
 		return nil, false
 	}
 	return auth, true
+}
+
+func (s *Service) syncProviderModelsFromManagement(ctx context.Context, auth *coreauth.Auth) (*coreauth.Auth, []*registry.ModelInfo, error) {
+	if s == nil || s.coreManager == nil {
+		return nil, nil, fmt.Errorf("core auth manager unavailable")
+	}
+	if auth == nil || auth.ID == "" {
+		return nil, nil, fmt.Errorf("provider credential not found")
+	}
+	if !supportsLiveModelInventory(auth) {
+		return nil, nil, fmt.Errorf("live model inventory is not supported for provider %q", strings.TrimSpace(auth.Provider))
+	}
+	next := auth.Clone()
+	inventory, err := s.discoverLiveModelInventory(ctx, next)
+	if err != nil {
+		return nil, nil, err
+	}
+	next.ModelInventory = &inventory
+	next.UpdatedAt = time.Now().UTC()
+	updated, err := s.coreManager.Update(ctx, next)
+	if err != nil {
+		return nil, nil, err
+	}
+	if updated != nil {
+		next = updated
+	}
+	if !next.Disabled {
+		s.ensureExecutorsForAuth(next)
+	}
+	s.registerModelsForAuth(next)
+	s.coreManager.ReconcileRegistryModelStates(ctx, next.ID)
+	s.coreManager.RefreshSchedulerEntry(next.ID)
+	return next, registry.GetGlobalRegistry().GetModelsForClient(next.ID), nil
 }
 
 func (s *Service) resolveConfigClaudeKey(auth *coreauth.Auth) *config.ClaudeKey {
