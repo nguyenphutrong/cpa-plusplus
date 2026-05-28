@@ -189,7 +189,6 @@ func TestModelCatalogReturnsRegistryLiveInventoryAndEnablement(t *testing.T) {
 	}
 	registry.GetGlobalRegistry().RegisterClient(auth.ID, "gemini", []*registry.ModelInfo{
 		{ID: "gemini-live", Object: "model", OwnedBy: "google", Type: "gemini", DisplayName: "Gemini Live", SupportedParameters: []string{"tools"}},
-		{ID: "gemini-disabled", Object: "model", OwnedBy: "google", Type: "gemini", DisplayName: "Gemini Disabled"},
 	})
 	defer registry.GetGlobalRegistry().UnregisterClient(auth.ID)
 

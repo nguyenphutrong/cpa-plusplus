@@ -190,7 +190,7 @@ func (h *Handler) buildModelCatalogProviders() []modelCatalogProvider {
 		} else if builder.provider.Status != "active" && auth.Unavailable {
 			builder.provider.Status = "unavailable"
 		}
-		for _, item := range modelCatalogItemsForAuth(ref.Public, auth) {
+		for _, item := range modelCatalogItemsForAuth(ref.Public, auth, h.excludedModelSet(ref.Public)) {
 			builder.add(item)
 		}
 	}
@@ -240,11 +240,8 @@ func (b *modelCatalogProviderBuilder) add(item modelCatalogItem) {
 	b.provider.Models = append(b.provider.Models, item)
 }
 
-func modelCatalogItemsForAuth(publicProvider string, auth *coreauth.Auth) []modelCatalogItem {
-	models := registry.GetGlobalRegistry().GetModelsForClient(auth.ID)
-	if len(models) == 0 && auth.ModelInventory != nil {
-		models = modelInfosFromInventory(publicProvider, auth.ModelInventory)
-	}
+func modelCatalogItemsForAuth(publicProvider string, auth *coreauth.Auth, excluded map[string]struct{}) []modelCatalogItem {
+	models := catalogModelInfosForAuth(publicProvider, auth, excluded)
 	items := make([]modelCatalogItem, 0, len(models))
 	for _, model := range models {
 		if model == nil {
@@ -281,6 +278,66 @@ func modelCatalogItemsForAuth(publicProvider string, auth *coreauth.Auth) []mode
 		items = append(items, item)
 	}
 	return items
+}
+
+func catalogModelInfosForAuth(publicProvider string, auth *coreauth.Auth, excluded map[string]struct{}) []*registry.ModelInfo {
+	if auth == nil {
+		return nil
+	}
+	rawProvider := auth.Provider
+	out := []*registry.ModelInfo{}
+	seen := map[string]struct{}{}
+	add := func(model *registry.ModelInfo) {
+		if model == nil {
+			return
+		}
+		modelID := providerLocalModelID(publicProvider, rawProvider, model.ID)
+		if modelID == "" {
+			return
+		}
+		key := strings.ToLower(modelID)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, model)
+	}
+
+	for _, model := range registry.GetGlobalRegistry().GetModelsForClient(auth.ID) {
+		add(model)
+	}
+	if auth.ModelInventory != nil {
+		for _, model := range modelInfosFromInventory(publicProvider, auth.ModelInventory) {
+			add(model)
+		}
+	}
+	for modelID := range excluded {
+		if strings.Contains(modelID, "*") {
+			continue
+		}
+		add(modelInfoForCatalogModel(publicProvider, modelID))
+	}
+	return out
+}
+
+func modelInfoForCatalogModel(publicProvider, modelID string) *registry.ModelInfo {
+	localID := normalizeProviderModelID(publicProvider, modelID)
+	if localID == "" {
+		return nil
+	}
+	info := registry.LookupModelInfo(localID, publicProvider)
+	if info == nil {
+		info = &registry.ModelInfo{
+			ID:          localID,
+			Object:      "model",
+			OwnedBy:     publicProvider,
+			Type:        publicProvider,
+			DisplayName: localID,
+			Name:        localID,
+		}
+	}
+	info.ID = localID
+	return info
 }
 
 func modelInfosFromInventory(provider string, inventory *coreauth.LiveModelInventory) []*registry.ModelInfo {
