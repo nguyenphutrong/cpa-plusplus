@@ -311,6 +311,11 @@ func catalogModelInfosForAuth(publicProvider string, auth *coreauth.Auth, exclud
 			add(model)
 		}
 	}
+	if len(out) == 0 {
+		for _, model := range registry.GetStaticModelDefinitionsByChannel(publicProvider) {
+			add(model)
+		}
+	}
 	for modelID := range excluded {
 		if strings.Contains(modelID, "*") {
 			continue
@@ -598,12 +603,15 @@ func providerSupportedModelIDs(auth *coreauth.Auth) []string {
 	if auth == nil {
 		return nil
 	}
+	public := publicProviderFromAuth(auth)
 	models := registry.GetGlobalRegistry().GetModelsForClient(auth.ID)
 	if len(models) == 0 && auth.ModelInventory != nil {
-		models = modelInfosFromInventory(publicProviderFromAuth(auth), auth.ModelInventory)
+		models = modelInfosFromInventory(public, auth.ModelInventory)
+	}
+	if len(models) == 0 {
+		models = registry.GetStaticModelDefinitionsByChannel(public)
 	}
 	out := make([]string, 0, len(models))
-	public := publicProviderFromAuth(auth)
 	for _, model := range models {
 		if model == nil {
 			continue

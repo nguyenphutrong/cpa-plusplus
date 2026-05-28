@@ -234,6 +234,46 @@ func TestModelCatalogReturnsRegistryLiveInventoryAndEnablement(t *testing.T) {
 	}
 }
 
+func TestModelCatalogFallsBackToStaticProviderDefinitions(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+	gin.SetMode(gin.TestMode)
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	auths := []*coreauth.Auth{
+		{ID: "catalog-copilot-auth", Provider: "github-copilot", Metadata: map[string]any{"username": "octo"}},
+		{ID: "catalog-kiro-auth", Provider: "kiro", Metadata: map[string]any{"email": "dev@example.com"}},
+	}
+	for _, auth := range auths {
+		if _, err := manager.Register(context.Background(), auth); err != nil {
+			t.Fatalf("register auth %s: %v", auth.ID, err)
+		}
+	}
+
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, manager)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v0/management/models/catalog", nil)
+	h.GetModelCatalog(ctx)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("catalog status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload modelCatalogResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	providers := map[string]modelCatalogProvider{}
+	for _, provider := range payload.Providers {
+		providers[provider.ProviderID] = provider
+	}
+	if !catalogProviderHasModel(providers["github-copilot"], "gpt-5.2-codex") {
+		t.Fatalf("github-copilot static models missing: %#v", providers["github-copilot"].Models)
+	}
+	if !catalogProviderHasModel(providers["kiro"], "auto") {
+		t.Fatalf("kiro static models missing: %#v", providers["kiro"].Models)
+	}
+}
+
 func TestProviderEnabledModelsRoundTripPersistsAsExcludedModels(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
 	gin.SetMode(gin.TestMode)
@@ -378,6 +418,40 @@ func TestProviderResponsesIncludeSupportedModels(t *testing.T) {
 	}
 }
 
+func TestProviderResponsesFallBackToStaticSupportedModels(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+	gin.SetMode(gin.TestMode)
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth := &coreauth.Auth{ID: "provider-models-kiro", Provider: "kiro", FileName: "kiro.json", Metadata: map[string]any{"email": "dev@example.com"}}
+	if _, err := manager.Register(context.Background(), auth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, manager)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v0/management/providers", nil)
+	h.ListProviders(ctx)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode providers: %v", err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("providers = %#v", payload)
+	}
+	if !stringSliceContains(anyStringSlice(payload[0]["supported_models"]), "auto") {
+		t.Fatalf("supported_models = %#v", payload[0]["supported_models"])
+	}
+	validation, ok := payload[0]["validation"].(map[string]any)
+	if !ok || !stringSliceContains(anyStringSlice(validation["supported_models"]), "auto") {
+		t.Fatalf("validation = %#v", payload[0]["validation"])
+	}
+}
+
 func TestProviderModelSyncUsesCallbackAndReportsUnsupported(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
 	gin.SetMode(gin.TestMode)
@@ -440,6 +514,15 @@ func anyStringSlice(value any) []string {
 		}
 	}
 	return out
+}
+
+func catalogProviderHasModel(provider modelCatalogProvider, modelID string) bool {
+	for _, model := range provider.Models {
+		if model.ModelID == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 func stringSliceContains(values []string, target string) bool {
