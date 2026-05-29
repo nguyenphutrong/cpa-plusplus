@@ -2,6 +2,8 @@ package usagestats
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -11,6 +13,8 @@ import (
 )
 
 const defaultSQLiteFileName = "usage-statistics.sqlite"
+
+var ErrDisabled = errors.New("usage stats service is disabled")
 
 type Service struct {
 	mu      sync.RWMutex
@@ -107,6 +111,84 @@ func (s *Service) HandleUsage(ctx context.Context, record coreusage.Record) {
 	if _, err := s.store.InsertEvents(ctx, []Event{event}); err != nil {
 		log.Warnf("failed to persist usage stats event: %v", err)
 	}
+}
+
+func (s *Service) QueryEvents(ctx context.Context, filter SummaryFilter, limit int, offset int) ([]Event, error) {
+	if s == nil {
+		return nil, ErrDisabled
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.enabled || s.store == nil {
+		return nil, ErrDisabled
+	}
+	return s.store.QueryEvents(ctx, filter, limit, offset)
+}
+
+func (s *Service) Summary(ctx context.Context, filter SummaryFilter, includeCost bool) (Summary, error) {
+	if s == nil {
+		return Summary{}, ErrDisabled
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.enabled || s.store == nil {
+		return Summary{}, ErrDisabled
+	}
+	return s.store.Summary(ctx, filter, includeCost)
+}
+
+func (s *Service) LoadModelPrices(ctx context.Context) (map[string]ModelPrice, error) {
+	if s == nil {
+		return nil, ErrDisabled
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.enabled || s.store == nil {
+		return nil, ErrDisabled
+	}
+	return s.store.LoadModelPrices(ctx)
+}
+
+func (s *Service) SaveModelPrices(ctx context.Context, prices map[string]ModelPrice) error {
+	if s == nil {
+		return ErrDisabled
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.enabled || s.store == nil {
+		return ErrDisabled
+	}
+	return s.store.SaveModelPrices(ctx, prices)
+}
+
+func (s *Service) UpsertModelPrices(ctx context.Context, prices map[string]ModelPrice) (InsertResult, error) {
+	if s == nil {
+		return InsertResult{}, ErrDisabled
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.enabled || s.store == nil {
+		return InsertResult{}, ErrDisabled
+	}
+	return s.store.UpsertModelPrices(ctx, prices)
+}
+
+func (s *Service) SyncLiteLLMModelPrices(
+	ctx context.Context,
+	client *http.Client,
+	sourceURL string,
+	models []string,
+) (ModelPriceSyncResult, error) {
+	if s == nil {
+		return ModelPriceSyncResult{}, ErrDisabled
+	}
+	s.mu.RLock()
+	enabled := s.enabled && s.store != nil
+	s.mu.RUnlock()
+	if !enabled {
+		return ModelPriceSyncResult{}, ErrDisabled
+	}
+	return SyncLiteLLMModelPrices(ctx, s, client, sourceURL, models)
 }
 
 func (s *Service) Status() ServiceStatus {

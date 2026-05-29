@@ -34,6 +34,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagestats"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
@@ -60,6 +61,7 @@ type serverOptionConfig struct {
 	keepAliveOnTimeout   func()
 	postAuthHook         auth.PostAuthHook
 	providerModelSyncer  managementHandlers.ProviderModelSyncer
+	usageStatsService    *usagestats.Service
 }
 
 // ServerOption customises HTTP server construction.
@@ -131,6 +133,13 @@ func WithPostAuthHook(hook auth.PostAuthHook) ServerOption {
 func WithProviderModelSyncer(syncer managementHandlers.ProviderModelSyncer) ServerOption {
 	return func(cfg *serverOptionConfig) {
 		cfg.providerModelSyncer = syncer
+	}
+}
+
+// WithUsageStatsService wires management usage-statistics endpoints to the built-in backend store.
+func WithUsageStatsService(service *usagestats.Service) ServerOption {
+	return func(cfg *serverOptionConfig) {
+		cfg.usageStatsService = service
 	}
 }
 
@@ -297,6 +306,9 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	if optionState.providerModelSyncer != nil {
 		s.mgmt.SetProviderModelSyncer(optionState.providerModelSyncer)
+	}
+	if optionState.usageStatsService != nil {
+		s.mgmt.SetUsageStatsService(optionState.usageStatsService)
 	}
 	s.localPassword = optionState.localPassword
 
@@ -634,6 +646,15 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/usage-statistics-enabled", s.mgmt.GetUsageStatisticsEnabled)
 		mgmt.PUT("/usage-statistics-enabled", s.mgmt.PutUsageStatisticsEnabled)
 		mgmt.PATCH("/usage-statistics-enabled", s.mgmt.PutUsageStatisticsEnabled)
+		mgmt.GET("/usage-stats/status", s.mgmt.GetUsageStatsStatus)
+		mgmt.GET("/usage-stats/events", s.mgmt.GetUsageStatsEvents)
+		mgmt.GET("/usage-stats/summary", s.mgmt.GetUsageStatsSummary)
+		mgmt.GET("/usage-stats/model-prices", s.mgmt.GetUsageStatsModelPrices)
+		mgmt.PUT("/usage-stats/model-prices", s.mgmt.PutUsageStatsModelPrices)
+		mgmt.POST("/usage-stats/model-prices/sync", s.mgmt.PostUsageStatsModelPricesSync)
+		mgmt.GET("/model-prices", s.mgmt.GetUsageStatsModelPrices)
+		mgmt.PUT("/model-prices", s.mgmt.PutUsageStatsModelPrices)
+		mgmt.POST("/model-prices/sync", s.mgmt.PostUsageStatsModelPricesSync)
 
 		mgmt.GET("/proxy-url", s.mgmt.GetProxyURL)
 		mgmt.PUT("/proxy-url", s.mgmt.PutProxyURL)

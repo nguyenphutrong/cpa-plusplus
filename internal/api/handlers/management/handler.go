@@ -17,6 +17,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/buildinfo"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagestats"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"golang.org/x/crypto/bcrypt"
@@ -53,6 +54,7 @@ type Handler struct {
 	logDir              string
 	postAuthHook        coreauth.PostAuthHook
 	providerModelSyncer ProviderModelSyncer
+	usageStats          *usagestats.Service
 }
 
 // NewHandler creates a new management handler instance.
@@ -152,6 +154,11 @@ func (h *Handler) SetPostAuthHook(hook coreauth.PostAuthHook) {
 // SetProviderModelSyncer registers the service-level live model sync callback.
 func (h *Handler) SetProviderModelSyncer(syncer ProviderModelSyncer) {
 	h.providerModelSyncer = syncer
+}
+
+// SetUsageStatsService registers the built-in usage statistics backend service.
+func (h *Handler) SetUsageStatsService(service *usagestats.Service) {
+	h.usageStats = service
 }
 
 // Middleware enforces access control for management endpoints.

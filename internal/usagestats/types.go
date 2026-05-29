@@ -56,11 +56,12 @@ type InsertResult struct {
 }
 
 type SummaryFilter struct {
-	StartMS *int64
-	EndMS   *int64
-	Account string
-	Model   string
-	Channel string
+	StartMS   *int64
+	EndMS     *int64
+	Account   string
+	Model     string
+	Channel   string
+	AuthIndex string
 }
 
 type Summary struct {

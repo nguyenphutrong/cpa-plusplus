@@ -466,8 +466,8 @@ func validPriceValue(value float64) bool {
 }
 
 func (filter SummaryFilter) whereClause() (string, []any) {
-	clauses := make([]string, 0, 5)
-	args := make([]any, 0, 5)
+	clauses := make([]string, 0, 6)
+	args := make([]any, 0, 6)
 	if filter.StartMS != nil {
 		clauses = append(clauses, "timestamp_ms >= ?")
 		args = append(args, *filter.StartMS)
@@ -488,6 +488,10 @@ func (filter SummaryFilter) whereClause() (string, []any) {
 	if strings.TrimSpace(filter.Channel) != "" {
 		clauses = append(clauses, "lower(coalesce(channel, '')) = ?")
 		args = append(args, strings.ToLower(strings.TrimSpace(filter.Channel)))
+	}
+	if strings.TrimSpace(filter.AuthIndex) != "" {
+		clauses = append(clauses, "auth_index = ?")
+		args = append(args, strings.TrimSpace(filter.AuthIndex))
 	}
 	if len(clauses) == 0 {
 		return "", args

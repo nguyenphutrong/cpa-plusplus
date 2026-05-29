@@ -868,6 +868,7 @@ func (s *Service) Run(ctx context.Context) error {
 	// handlers no longer depend on legacy clients; pass nil slice initially
 	serverOptions := append([]api.ServerOption(nil), s.serverOptions...)
 	serverOptions = append(serverOptions, api.WithProviderModelSyncer(s.syncProviderModelsFromManagement))
+	serverOptions = append(serverOptions, api.WithUsageStatsService(s.usageStats))
 	s.server = api.NewServer(s.cfg, s.coreManager, s.accessManager, s.configPath, serverOptions...)
 
 	if s.authManager == nil {
