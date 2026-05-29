@@ -17,6 +17,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagestats"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/watcher/diff"
@@ -59,6 +60,11 @@ type Service struct {
 
 	// serverOptions contains additional server configuration options.
 	serverOptions []api.ServerOption
+
+	// usageStats persists built-in request-level usage events when enabled.
+	usageStats *usagestats.Service
+
+	usageStatsRegistered bool
 
 	// server is the HTTP API server instance.
 	server *api.Server
@@ -107,6 +113,39 @@ type Service struct {
 //   - plugin: The usage plugin to register
 func (s *Service) RegisterUsagePlugin(plugin usage.Plugin) {
 	usage.RegisterPlugin(plugin)
+}
+
+func (s *Service) ensureUsageStatsService() *usagestats.Service {
+	if s == nil {
+		return nil
+	}
+	if s.usageStats == nil {
+		s.usageStats = usagestats.NewService()
+	}
+	if !s.usageStatsRegistered {
+		usage.RegisterPlugin(s.usageStats)
+		s.usageStatsRegistered = true
+	}
+	return s.usageStats
+}
+
+func (s *Service) configureUsageStats(cfg *config.Config) {
+	if s == nil {
+		return
+	}
+	service := s.ensureUsageStatsService()
+	if service == nil {
+		return
+	}
+	enabled := cfg != nil && cfg.UsageStatisticsEnabled
+	configuredPath := ""
+	if cfg != nil {
+		configuredPath = cfg.UsageStatisticsDBPath
+	}
+	path := usagestats.ResolveSQLitePath(s.configPath, configuredPath)
+	if err := service.Configure(context.Background(), enabled, path); err != nil {
+		log.Warnf("failed to configure usage stats sqlite store; usage stats persistence disabled: %v", err)
+	}
 }
 
 // newDefaultAuthManager creates a default authentication manager with all supported providers.
@@ -563,6 +602,7 @@ func (s *Service) applyConfigUpdate(newCfg *config.Config) {
 
 	s.applyRetryConfig(newCfg)
 	s.applyPprofConfig(newCfg)
+	s.configureUsageStats(newCfg)
 	if s.server != nil {
 		s.server.UpdateClients(newCfg)
 	}
@@ -775,12 +815,13 @@ func (s *Service) Run(ctx context.Context) error {
 		ctx = context.Background()
 	}
 
-	usage.StartDefault(ctx)
 	homeEnabled := s.cfg != nil && s.cfg.Home.Enabled
 	if homeEnabled {
 		forceHomeRuntimeConfig(s.cfg)
 		redisqueue.SetUsageStatisticsEnabled(true)
 	}
+	s.configureUsageStats(s.cfg)
+	usage.StartDefault(ctx)
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
@@ -1040,6 +1081,14 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		}
 
 		usage.StopDefault()
+		if s.usageStats != nil {
+			if err := s.usageStats.Close(); err != nil {
+				log.Errorf("failed to close usage stats sqlite store: %v", err)
+				if shutdownErr == nil {
+					shutdownErr = err
+				}
+			}
+		}
 	})
 	return shutdownErr
 }

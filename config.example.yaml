@@ -66,6 +66,9 @@ error-logs-max-files: 10
 # When false, disable in-memory usage statistics aggregation
 usage-statistics-enabled: false
 
+# SQLite path for built-in usage statistics. Empty creates usage-statistics.sqlite next to this config.
+usage-statistics-db-path: ""
+
 # How long (in seconds) usage queue items are retained in memory for the Management API.
 # The local Redis RESP usage output is disabled.
 # Default: 60. Max: 3600.

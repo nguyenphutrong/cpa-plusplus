@@ -2,6 +2,7 @@ package cliproxy
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -116,9 +117,15 @@ func TestApplyHomeOverlayForcesUsageStatisticsEnabled(t *testing.T) {
 	baseCfg := &config.Config{}
 	baseCfg.Home.Enabled = true
 	service := &Service{cfg: baseCfg}
+	t.Cleanup(func() {
+		if service.usageStats != nil {
+			_ = service.usageStats.Close()
+		}
+	})
 
 	service.applyHomeOverlay(&config.Config{
 		UsageStatisticsEnabled: false,
+		UsageStatisticsDBPath:  filepath.Join(t.TempDir(), "usage.sqlite"),
 	})
 
 	if service.cfg == nil || !service.cfg.UsageStatisticsEnabled {

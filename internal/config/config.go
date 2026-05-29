@@ -69,6 +69,10 @@ type Config struct {
 	// UsageStatisticsEnabled toggles in-memory usage aggregation; when false, usage data is discarded.
 	UsageStatisticsEnabled bool `yaml:"usage-statistics-enabled" json:"usage-statistics-enabled"`
 
+	// UsageStatisticsDBPath controls the embedded SQLite database used by built-in usage statistics.
+	// When empty, usage-statistics.sqlite is created next to the config file.
+	UsageStatisticsDBPath string `yaml:"usage-statistics-db-path" json:"usage-statistics-db-path"`
+
 	// RedisUsageQueueRetentionSeconds controls how long usage queue items are retained
 	// in memory for Management API consumers.
 	// Default: 60. Max: 3600.
