@@ -868,8 +868,8 @@ func (s *Service) Run(ctx context.Context) error {
 		s.hooks.OnBeforeStart(s.cfg)
 	}
 
-	// Register callback for startup and periodic model catalog refresh.
-	// When remote model definitions change, re-register models for affected providers.
+	// Register callback for startup model catalog repair.
+	// When embedded model definitions repair stale catalog state, re-register affected providers.
 	// This intentionally rebuilds per-auth model availability from the latest catalog
 	// snapshot instead of preserving prior registry suppression state.
 	registry.SetModelRefreshCallback(func(changedProviders []string) {

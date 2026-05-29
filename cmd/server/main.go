@@ -119,7 +119,7 @@ func main() {
 	flag.BoolVar(&homeDisableClusterDiscovery, "home-disable-cluster-discovery", false, "Disable Home CLUSTER NODES discovery and keep using the configured -home-jwt address")
 	flag.BoolVar(&tuiMode, "tui", false, "Start with terminal management UI")
 	flag.BoolVar(&standalone, "standalone", false, "In TUI mode, start an embedded local server")
-	flag.BoolVar(&localModel, "local-model", false, "Use embedded model catalog only, skip remote model fetching")
+	flag.BoolVar(&localModel, "local-model", false, "Use embedded model catalog only")
 
 	flag.CommandLine.Usage = func() {
 		out := flag.CommandLine.Output()
@@ -601,7 +601,7 @@ func main() {
 			return
 		}
 		if localModel && (!tuiMode || standalone) {
-			log.Info("Local model mode: using embedded model catalog, remote model updates disabled")
+			log.Info("Local model mode: using embedded model catalog")
 		}
 		if tuiMode {
 			if standalone {
@@ -611,7 +611,7 @@ func main() {
 				if !localModel && !cfg.Home.Enabled {
 					registry.StartModelsUpdater(context.Background())
 				} else if cfg.Home.Enabled {
-					log.Info("Home mode: remote model updates disabled")
+					log.Info("Home mode: using embedded model catalog")
 				}
 				hook := tui.NewLogHook(2000)
 				hook.SetFormatter(&logging.LogFormatter{})
@@ -689,7 +689,7 @@ func main() {
 			if !localModel && !cfg.Home.Enabled {
 				registry.StartModelsUpdater(context.Background())
 			} else if cfg.Home.Enabled {
-				log.Info("Home mode: remote model updates disabled")
+				log.Info("Home mode: using embedded model catalog")
 			}
 			cmd.StartService(cfg, configFilePath, password)
 		}

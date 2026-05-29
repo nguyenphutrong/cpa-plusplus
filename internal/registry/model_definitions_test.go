@@ -58,21 +58,65 @@ func TestValidateModelsCatalogAllowsMissingSections(t *testing.T) {
 	}
 }
 
-func TestMergeLocalOnlyModelSectionsPreservesForkModels(t *testing.T) {
-	fallback := validTestModelsCatalog()
-	fallback.GitHubCopilot = []*ModelInfo{{ID: "copilot-model"}}
-	fallback.Kiro = []*ModelInfo{{ID: "kiro-model"}}
-	remote := validTestModelsCatalog()
-	remote.GitHubCopilot = nil
-	remote.Kiro = nil
+func TestOverlayEmbeddedCatalogDefaultsPreservesForkModels(t *testing.T) {
+	current := validTestModelsCatalog()
+	current.GitHubCopilot = nil
+	current.Kiro = []*ModelInfo{{ID: "custom-kiro-model"}}
+	embedded := validTestModelsCatalog()
+	embedded.GitHubCopilot = []*ModelInfo{{ID: "copilot-model"}}
+	embedded.Kiro = []*ModelInfo{{ID: "kiro-model"}}
 
-	mergeLocalOnlyModelSections(remote, fallback)
+	repaired := overlayEmbeddedCatalogDefaults(current, embedded)
 
-	if findModelInfo(remote.GitHubCopilot, "copilot-model") == nil {
-		t.Fatalf("github-copilot fallback not preserved: %#v", remote.GitHubCopilot)
+	if findModelInfo(repaired.GitHubCopilot, "copilot-model") == nil {
+		t.Fatalf("github-copilot fallback not preserved: %#v", repaired.GitHubCopilot)
 	}
-	if findModelInfo(remote.Kiro, "kiro-model") == nil {
-		t.Fatalf("kiro fallback not preserved: %#v", remote.Kiro)
+	if findModelInfo(repaired.Kiro, "custom-kiro-model") == nil {
+		t.Fatalf("kiro existing model not preserved: %#v", repaired.Kiro)
+	}
+	if findModelInfo(repaired.Kiro, "kiro-model") == nil {
+		t.Fatalf("kiro fallback not preserved: %#v", repaired.Kiro)
+	}
+}
+
+func TestRepairModelsFromEmbeddedCatalogRestoresForkProviderDefaults(t *testing.T) {
+	embedded, err := parseModelsFromBytes(embeddedModelsJSON, "test")
+	if err != nil {
+		t.Fatalf("parse embedded models: %v", err)
+	}
+	current := cloneStaticModelsJSON(embedded)
+	current.GitHubCopilot = nil
+	current.Kiro = []*ModelInfo{{ID: "custom-kiro-model"}}
+	restoreModelsCatalogForTest(t, current)
+	restoreModelRefreshCallbackForTest(t)
+
+	changedCh := make(chan []string, 1)
+	SetModelRefreshCallback(func(changed []string) {
+		changedCh <- changed
+	})
+
+	repairModelsFromEmbeddedCatalog("test model catalog repair")
+
+	if findModelInfo(GetGitHubCopilotModels(), "gpt-5.2-codex") == nil {
+		t.Fatalf("github-copilot embedded defaults missing after repair: %#v", GetGitHubCopilotModels())
+	}
+	if findModelInfo(GetKiroModels(), "custom-kiro-model") == nil {
+		t.Fatalf("kiro persisted model missing after repair: %#v", GetKiroModels())
+	}
+	if findModelInfo(GetKiroModels(), "auto") == nil {
+		t.Fatalf("kiro embedded defaults missing after repair: %#v", GetKiroModels())
+	}
+
+	select {
+	case changed := <-changedCh:
+		if !stringSliceContains(changed, "github-copilot") {
+			t.Fatalf("changed providers missing github-copilot: %#v", changed)
+		}
+		if !stringSliceContains(changed, "kiro") {
+			t.Fatalf("changed providers missing kiro: %#v", changed)
+		}
+	default:
+		t.Fatal("expected repair to notify changed fork providers")
 	}
 }
 
@@ -190,4 +234,37 @@ func stringSliceContains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func restoreModelsCatalogForTest(t *testing.T, data *staticModelsJSON) {
+	t.Helper()
+
+	original := cloneStaticModelsJSON(getModels())
+	modelsCatalogStore.mu.Lock()
+	modelsCatalogStore.data = cloneStaticModelsJSON(data)
+	modelsCatalogStore.mu.Unlock()
+
+	t.Cleanup(func() {
+		modelsCatalogStore.mu.Lock()
+		modelsCatalogStore.data = original
+		modelsCatalogStore.mu.Unlock()
+	})
+}
+
+func restoreModelRefreshCallbackForTest(t *testing.T) {
+	t.Helper()
+
+	refreshCallbackMu.Lock()
+	originalCallback := refreshCallback
+	originalPending := append([]string(nil), pendingRefreshChanges...)
+	refreshCallback = nil
+	pendingRefreshChanges = nil
+	refreshCallbackMu.Unlock()
+
+	t.Cleanup(func() {
+		refreshCallbackMu.Lock()
+		refreshCallback = originalCallback
+		pendingRefreshChanges = originalPending
+		refreshCallbackMu.Unlock()
+	})
 }

@@ -5,24 +5,11 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 )
-
-const (
-	modelsFetchTimeout    = 30 * time.Second
-	modelsRefreshInterval = 3 * time.Hour
-)
-
-var modelsURLs = []string{
-	"https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json",
-	"https://models.router-for.me/models.json",
-}
 
 //go:embed models/models.json
 var embeddedModelsJSON []byte
@@ -36,7 +23,7 @@ var modelsCatalogStore = &modelStore{}
 
 var updaterOnce sync.Once
 
-// ModelRefreshCallback is invoked when startup or periodic model refresh detects changes.
+// ModelRefreshCallback is invoked when startup model catalog repair detects changes.
 // changedProviders contains the provider names whose model definitions changed.
 type ModelRefreshCallback func(changedProviders []string)
 
@@ -46,9 +33,9 @@ var (
 	pendingRefreshChanges []string
 )
 
-// SetModelRefreshCallback registers a callback that is invoked when startup or
-// periodic model refresh detects changes. Only one callback is supported;
-// subsequent calls replace the previous callback.
+// SetModelRefreshCallback registers a callback that is invoked when model
+// catalog repair detects changes. Only one callback is supported; subsequent
+// calls replace the previous callback.
 func SetModelRefreshCallback(cb ModelRefreshCallback) {
 	refreshCallbackMu.Lock()
 	refreshCallback = cb
@@ -65,129 +52,47 @@ func SetModelRefreshCallback(cb ModelRefreshCallback) {
 }
 
 func init() {
-	// Load embedded data as fallback on startup.
+	// Load the embedded cpa-plusplus catalog as the canonical startup default.
 	if err := loadModelsFromBytes(embeddedModelsJSON, "embed"); err != nil {
-		log.Warnf("registry: failed to parse embedded models.json (embedded catalog may be incomplete or invalid; continuing startup and will rely on remote model refresh): %v", err)
+		log.Warnf("registry: failed to parse embedded models.json: %v", err)
 	}
 }
 
-// StartModelsUpdater starts a background updater that fetches models
-// immediately on startup and then refreshes the model catalog every 3 hours.
-// Safe to call multiple times; only one updater will run.
+// StartModelsUpdater repairs the in-memory catalog from the embedded
+// cpa-plusplus catalog once during startup. It keeps the historical name for
+// caller compatibility, but it does not fetch remote model catalogs.
+// Safe to call multiple times; only one repair will run.
 func StartModelsUpdater(ctx context.Context) {
+	_ = ctx
 	updaterOnce.Do(func() {
-		go runModelsUpdater(ctx)
+		repairModelsFromEmbeddedCatalog("startup model catalog repair")
 	})
 }
 
-func runModelsUpdater(ctx context.Context) {
-	tryStartupRefresh(ctx)
-	periodicRefresh(ctx)
-}
-
-func periodicRefresh(ctx context.Context) {
-	ticker := time.NewTicker(modelsRefreshInterval)
-	defer ticker.Stop()
-	log.Infof("periodic model refresh started (interval=%s)", modelsRefreshInterval)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			tryPeriodicRefresh(ctx)
-		}
-	}
-}
-
-// tryPeriodicRefresh fetches models from remote, compares with the current
-// catalog, and notifies the registered callback if any provider changed.
-func tryPeriodicRefresh(ctx context.Context) {
-	tryRefreshModels(ctx, "periodic model refresh")
-}
-
-// tryStartupRefresh fetches models from remote in the background during
-// process startup. It uses the same change detection as periodic refresh so
-// existing auth registrations can be updated after the callback is registered.
-func tryStartupRefresh(ctx context.Context) {
-	tryRefreshModels(ctx, "startup model refresh")
-}
-
-func tryRefreshModels(ctx context.Context, label string) {
+func repairModelsFromEmbeddedCatalog(label string) {
 	oldData := getModels()
 
-	parsed, url := fetchModelsFromRemote(ctx)
-	if parsed == nil {
-		log.Warnf("%s: fetch failed from all URLs, keeping current data", label)
+	embedded, err := parseModelsFromBytes(embeddedModelsJSON, "embed")
+	if err != nil {
+		log.Warnf("%s: failed to parse embedded catalog, keeping current data: %v", label, err)
 		return
 	}
-	mergeLocalOnlyModelSections(parsed, oldData)
+	repaired := overlayEmbeddedCatalogDefaults(oldData, embedded)
 
 	// Detect changes before updating store.
-	changed := detectChangedProviders(oldData, parsed)
+	changed := detectChangedProviders(oldData, repaired)
 
-	// Update store with new data regardless.
 	modelsCatalogStore.mu.Lock()
-	modelsCatalogStore.data = parsed
+	modelsCatalogStore.data = repaired
 	modelsCatalogStore.mu.Unlock()
 
 	if len(changed) == 0 {
-		log.Infof("%s completed from %s, no changes detected", label, url)
+		log.Debugf("%s completed from embedded catalog, no changes detected", label)
 		return
 	}
 
-	log.Infof("%s completed from %s, changes detected for providers: %v", label, url, changed)
+	log.Infof("%s completed from embedded catalog, changes detected for providers: %v", label, changed)
 	notifyModelRefresh(changed)
-}
-
-// fetchModelsFromRemote tries all remote URLs and returns the parsed model catalog
-// along with the URL it was fetched from. Returns (nil, "") if all fetches fail.
-func fetchModelsFromRemote(ctx context.Context) (*staticModelsJSON, string) {
-	client := &http.Client{Timeout: modelsFetchTimeout}
-	for _, url := range modelsURLs {
-		reqCtx, cancel := context.WithTimeout(ctx, modelsFetchTimeout)
-		req, err := http.NewRequestWithContext(reqCtx, "GET", url, nil)
-		if err != nil {
-			cancel()
-			log.Debugf("models fetch request creation failed for %s: %v", url, err)
-			continue
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			cancel()
-			log.Debugf("models fetch failed from %s: %v", url, err)
-			continue
-		}
-
-		if resp.StatusCode != 200 {
-			resp.Body.Close()
-			cancel()
-			log.Debugf("models fetch returned %d from %s", resp.StatusCode, url)
-			continue
-		}
-
-		data, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		cancel()
-
-		if err != nil {
-			log.Debugf("models fetch read error from %s: %v", url, err)
-			continue
-		}
-
-		var parsed staticModelsJSON
-		if err := json.Unmarshal(data, &parsed); err != nil {
-			log.Warnf("models parse failed from %s: %v", url, err)
-			continue
-		}
-		if err := validateModelsCatalog(&parsed); err != nil {
-			log.Warnf("models validate failed from %s: %v", url, err)
-			continue
-		}
-
-		return &parsed, url
-	}
-	return nil, ""
 }
 
 // detectChangedProviders compares two model catalogs and returns provider names
@@ -235,16 +140,63 @@ func detectChangedProviders(oldData, newData *staticModelsJSON) []string {
 	return changed
 }
 
-func mergeLocalOnlyModelSections(remote, fallback *staticModelsJSON) {
-	if remote == nil || fallback == nil {
+func overlayEmbeddedCatalogDefaults(current, embedded *staticModelsJSON) *staticModelsJSON {
+	if embedded == nil {
+		return cloneStaticModelsJSON(current)
+	}
+	if current == nil {
+		return cloneStaticModelsJSON(embedded)
+	}
+
+	repaired := cloneStaticModelsJSON(current)
+	overlayModelSectionDefaults(&repaired.Claude, embedded.Claude)
+	overlayModelSectionDefaults(&repaired.Gemini, embedded.Gemini)
+	overlayModelSectionDefaults(&repaired.Vertex, embedded.Vertex)
+	overlayModelSectionDefaults(&repaired.GeminiCLI, embedded.GeminiCLI)
+	overlayModelSectionDefaults(&repaired.AIStudio, embedded.AIStudio)
+	overlayModelSectionDefaults(&repaired.CodexFree, embedded.CodexFree)
+	overlayModelSectionDefaults(&repaired.CodexTeam, embedded.CodexTeam)
+	overlayModelSectionDefaults(&repaired.CodexPlus, embedded.CodexPlus)
+	overlayModelSectionDefaults(&repaired.CodexPro, embedded.CodexPro)
+	overlayModelSectionDefaults(&repaired.Kimi, embedded.Kimi)
+	overlayModelSectionDefaults(&repaired.Antigravity, embedded.Antigravity)
+	overlayModelSectionDefaults(&repaired.GitHubCopilot, embedded.GitHubCopilot)
+	overlayModelSectionDefaults(&repaired.Kiro, embedded.Kiro)
+	overlayModelSectionDefaults(&repaired.XAI, embedded.XAI)
+	return repaired
+}
+
+func overlayModelSectionDefaults(section *[]*ModelInfo, defaults []*ModelInfo) {
+	if len(defaults) == 0 {
 		return
 	}
-	if len(remote.GitHubCopilot) == 0 && len(fallback.GitHubCopilot) > 0 {
-		remote.GitHubCopilot = cloneModelInfos(fallback.GitHubCopilot)
+	if len(*section) == 0 {
+		*section = cloneModelInfos(defaults)
+		return
 	}
-	if len(remote.Kiro) == 0 && len(fallback.Kiro) > 0 {
-		remote.Kiro = cloneModelInfos(fallback.Kiro)
+
+	seen := make(map[string]struct{}, len(*section)+len(defaults))
+	out := make([]*ModelInfo, 0, len(*section)+len(defaults))
+	for _, model := range *section {
+		if model == nil || strings.TrimSpace(model.ID) == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(model.ID))
+		seen[key] = struct{}{}
+		out = append(out, cloneModelInfo(model))
 	}
+	for _, model := range defaults {
+		if model == nil || strings.TrimSpace(model.ID) == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(model.ID))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, cloneModelInfo(model))
+	}
+	*section = out
 }
 
 // modelSectionChanged reports whether two model slices differ.
@@ -311,24 +263,57 @@ func mergeProviderNames(existing, incoming []string) []string {
 }
 
 func loadModelsFromBytes(data []byte, source string) error {
-	var parsed staticModelsJSON
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return fmt.Errorf("%s: decode models catalog: %w", source, err)
-	}
-	if err := validateModelsCatalog(&parsed); err != nil {
-		return fmt.Errorf("%s: validate models catalog: %w", source, err)
+	parsed, err := parseModelsFromBytes(data, source)
+	if err != nil {
+		return err
 	}
 
 	modelsCatalogStore.mu.Lock()
-	modelsCatalogStore.data = &parsed
+	modelsCatalogStore.data = parsed
 	modelsCatalogStore.mu.Unlock()
 	return nil
+}
+
+func parseModelsFromBytes(data []byte, source string) (*staticModelsJSON, error) {
+	var parsed staticModelsJSON
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil, fmt.Errorf("%s: decode models catalog: %w", source, err)
+	}
+	if err := validateModelsCatalog(&parsed); err != nil {
+		return nil, fmt.Errorf("%s: validate models catalog: %w", source, err)
+	}
+	return &parsed, nil
 }
 
 func getModels() *staticModelsJSON {
 	modelsCatalogStore.mu.RLock()
 	defer modelsCatalogStore.mu.RUnlock()
+	if modelsCatalogStore.data == nil {
+		return &staticModelsJSON{}
+	}
 	return modelsCatalogStore.data
+}
+
+func cloneStaticModelsJSON(data *staticModelsJSON) *staticModelsJSON {
+	if data == nil {
+		return &staticModelsJSON{}
+	}
+	return &staticModelsJSON{
+		Claude:        cloneModelInfos(data.Claude),
+		Gemini:        cloneModelInfos(data.Gemini),
+		Vertex:        cloneModelInfos(data.Vertex),
+		GeminiCLI:     cloneModelInfos(data.GeminiCLI),
+		AIStudio:      cloneModelInfos(data.AIStudio),
+		CodexFree:     cloneModelInfos(data.CodexFree),
+		CodexTeam:     cloneModelInfos(data.CodexTeam),
+		CodexPlus:     cloneModelInfos(data.CodexPlus),
+		CodexPro:      cloneModelInfos(data.CodexPro),
+		Kimi:          cloneModelInfos(data.Kimi),
+		Antigravity:   cloneModelInfos(data.Antigravity),
+		GitHubCopilot: cloneModelInfos(data.GitHubCopilot),
+		Kiro:          cloneModelInfos(data.Kiro),
+		XAI:           cloneModelInfos(data.XAI),
+	}
 }
 
 func validateModelsCatalog(data *staticModelsJSON) error {
@@ -351,6 +336,8 @@ func validateModelsCatalog(data *staticModelsJSON) error {
 		{name: "codex-pro", models: data.CodexPro},
 		{name: "kimi", models: data.Kimi},
 		{name: "antigravity", models: data.Antigravity},
+		{name: "github-copilot", models: data.GitHubCopilot},
+		{name: "kiro", models: data.Kiro},
 		{name: "xai", models: data.XAI},
 	}
 
