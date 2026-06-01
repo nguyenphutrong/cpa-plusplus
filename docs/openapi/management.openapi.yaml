@@ -124,13 +124,15 @@ paths:
   /logging-to-file:
     get:
       tags: [Config]
-      summary: Get file logging setting
+      summary: Get application log file output setting
+      description: Controls application/runtime logrus output and /v0/management/logs only. Raw request debug logs and usage statistics use separate settings.
       responses:
         "200":
           $ref: "#/components/responses/BooleanSetting"
     put:
       tags: [Config]
-      summary: Set file logging
+      summary: Set application log file output
+      description: Controls application/runtime logrus output and /v0/management/logs only.
       requestBody:
         $ref: "#/components/requestBodies/BooleanSetting"
       responses:
@@ -138,7 +140,8 @@ paths:
           $ref: "#/components/responses/StatusOK"
     patch:
       tags: [Config]
-      summary: Patch file logging
+      summary: Patch application log file output
+      description: Controls application/runtime logrus output and /v0/management/logs only.
       requestBody:
         $ref: "#/components/requestBodies/BooleanSetting"
       responses:
@@ -194,12 +197,14 @@ paths:
     get:
       tags: [Config]
       summary: Get usage statistics setting
+      description: Controls structured SQLite usage statistics and the legacy usage queue compatibility path. It does not control application logs or raw request debug logs.
       responses:
         "200":
           $ref: "#/components/responses/BooleanSetting"
     put:
       tags: [Config]
       summary: Set usage statistics setting
+      description: Controls structured SQLite usage statistics and the legacy usage queue compatibility path.
       requestBody:
         $ref: "#/components/requestBodies/BooleanSetting"
       responses:
@@ -208,6 +213,7 @@ paths:
     patch:
       tags: [Config]
       summary: Patch usage statistics setting
+      description: Controls structured SQLite usage statistics and the legacy usage queue compatibility path.
       requestBody:
         $ref: "#/components/requestBodies/BooleanSetting"
       responses:
@@ -510,7 +516,7 @@ paths:
     get:
       tags: [Providers, Models]
       summary: Get enabled models for a provider
-      description: `enabled_models: null` means all catalog models for the provider are enabled. An array is an explicit allowlist.
+      description: "`enabled_models: null` means all catalog models for the provider are enabled. An array is an explicit allowlist."
       parameters:
         - $ref: "#/components/parameters/ProviderPath"
       responses:
@@ -525,7 +531,7 @@ paths:
     put:
       tags: [Providers, Models]
       summary: Replace enabled models for a provider
-      description: Persists an enabled-model facade over the existing excluded-model storage. `enabled_models: null` clears the allowlist so all catalog models are enabled.
+      description: "Persists an enabled-model facade over the existing excluded-model storage. `enabled_models: null` clears the allowlist so all catalog models are enabled."
       parameters:
         - $ref: "#/components/parameters/ProviderPath"
       requestBody:
@@ -784,7 +790,11 @@ paths:
       summary: List configured API keys
       responses:
         "200":
-          $ref: "#/components/responses/DynamicObject"
+          description: Usage statistics service status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageStatsStatus"
     put:
       tags: [API Keys]
       summary: Replace configured API keys
@@ -810,10 +820,15 @@ paths:
   /api-key-usage:
     get:
       tags: [API Keys]
-      summary: Get API key usage
+      summary: Get legacy in-memory API key usage snapshot
+      description: Legacy in-memory snapshot for API-key auths. Use /usage-stats/events or /usage-stats/summary for persistent request-level usage analytics.
       responses:
         "200":
-          $ref: "#/components/responses/DynamicObject"
+          description: Structured usage events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageStatsEventsResponse"
 
   /gemini-api-key:
     $ref: "#/components/pathItems/KeyList"
@@ -829,27 +844,40 @@ paths:
   /logs:
     get:
       tags: [Logs]
-      summary: List server logs
+      summary: List application/runtime logs
+      description: Reads rotating main.log files when logging-to-file is enabled. This endpoint is for app logs, not raw request debug logs or usage statistics.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: after
+          in: query
+          schema:
+            type: integer
+            format: int64
       responses:
         "200":
           $ref: "#/components/responses/DynamicObject"
     delete:
       tags: [Logs]
-      summary: Delete logs
+      summary: Delete application/runtime logs
+      description: Deletes rotating application log files and truncates the active main.log.
       responses:
         "200":
           $ref: "#/components/responses/StatusOK"
   /request-error-logs:
     get:
       tags: [Logs]
-      summary: List request error logs
+      summary: List raw request debug error logs
+      description: Lists per-request debug log files captured for failed requests when full request-log is disabled. Not intended for usage analytics.
       responses:
         "200":
           $ref: "#/components/responses/DynamicObject"
   /request-error-logs/{name}:
     get:
       tags: [Logs]
-      summary: Download a request error log
+      summary: Download a raw request debug error log
       parameters:
         - name: name
           in: path
@@ -866,7 +894,8 @@ paths:
   /request-log-by-id/{id}:
     get:
       tags: [Logs]
-      summary: Get request log by id
+      summary: Get raw request debug log by id
+      description: Downloads a high-overhead request/response debug log by request id. Use usage-stats endpoints for structured usage analytics.
       parameters:
         - name: id
           in: path
@@ -879,13 +908,15 @@ paths:
   /request-log:
     get:
       tags: [Logs]
-      summary: Get request logging config
+      summary: Get raw request debug logging config
+      description: Controls high-overhead raw request/response debug logs. This does not affect SQLite usage statistics collection.
       responses:
         "200":
           $ref: "#/components/responses/DynamicObject"
     put:
       tags: [Logs]
-      summary: Set request logging config
+      summary: Set raw request debug logging config
+      description: Controls high-overhead raw request/response debug logs. This does not affect SQLite usage statistics collection.
       requestBody:
         $ref: "#/components/requestBodies/DynamicObject"
       responses:
@@ -893,7 +924,8 @@ paths:
           $ref: "#/components/responses/StatusOK"
     patch:
       tags: [Logs]
-      summary: Patch request logging config
+      summary: Patch raw request debug logging config
+      description: Controls high-overhead raw request/response debug logs. This does not affect SQLite usage statistics collection.
       requestBody:
         $ref: "#/components/requestBodies/DynamicObject"
       responses:
@@ -902,13 +934,178 @@ paths:
   /usage-queue:
     get:
       tags: [Usage]
-      summary: Pop queued usage events
+      summary: Pop legacy queued usage events
+      description: Compatibility/collector surface for legacy consumers. New UI usage and request statistics should use /usage-stats/events and /usage-stats/summary.
       parameters:
         - name: count
           in: query
           schema:
             type: integer
+            default: 1
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+  /usage-stats/status:
+    get:
+      tags: [Usage]
+      summary: Get structured usage statistics status
+      description: Reports whether the SQLite usage statistics backend is enabled and ready.
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+  /usage-stats/events:
+    get:
+      tags: [Usage]
+      summary: List structured usage events
+      description: Primary backend surface for UI request-level usage statistics from the SQLite usage store.
+      parameters:
+        - name: account
+          in: query
+          schema:
+            type: string
+        - name: model
+          in: query
+          schema:
+            type: string
+        - name: channel
+          in: query
+          schema:
+            type: string
+        - name: auth_index
+          in: query
+          schema:
+            type: string
+        - name: start_ms
+          in: query
+          schema:
+            type: integer
+            format: int64
+        - name: end_ms
+          in: query
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          schema:
+            type: integer
             default: 100
+            maximum: 1000
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+  /usage-stats/summary:
+    get:
+      tags: [Usage]
+      summary: Get structured usage summary
+      description: Primary backend surface for aggregated UI usage statistics from the SQLite usage store.
+      parameters:
+        - name: account
+          in: query
+          schema:
+            type: string
+        - name: model
+          in: query
+          schema:
+            type: string
+        - name: channel
+          in: query
+          schema:
+            type: string
+        - name: auth_index
+          in: query
+          schema:
+            type: string
+        - name: start_ms
+          in: query
+          schema:
+            type: integer
+            format: int64
+        - name: end_ms
+          in: query
+          schema:
+            type: integer
+            format: int64
+        - name: include_cost
+          in: query
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+  /usage-stats/model-prices:
+    get:
+      tags: [Usage]
+      summary: Get usage statistics model price table
+      description: Reads the editable model price table used for usage cost estimation.
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+    put:
+      tags: [Usage]
+      summary: Replace usage statistics model price table
+      description: Updates the editable model price table used for usage cost estimation.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UsageStatsModelPricesSyncRequest"
+      responses:
+        "200":
+          description: Model price sync result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageStatsModelPricesSyncResult"
+  /usage-stats/model-prices/sync:
+    post:
+      tags: [Usage]
+      summary: Sync usage statistics model prices from LiteLLM
+      description: Fetches the latest LiteLLM price table on demand and stores matching model prices locally.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UsageStatsModelPricesSyncRequest"
+      responses:
+        "200":
+          description: Model price sync result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageStatsModelPricesSyncResult"
+  /model-prices:
+    get:
+      tags: [Usage]
+      summary: Get model price table legacy alias
+      description: Legacy alias for /usage-stats/model-prices.
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+    put:
+      tags: [Usage]
+      summary: Replace model price table legacy alias
+      description: Legacy alias for /usage-stats/model-prices.
+      requestBody:
+        $ref: "#/components/requestBodies/DynamicObject"
+      responses:
+        "200":
+          $ref: "#/components/responses/DynamicObject"
+  /model-prices/sync:
+    post:
+      tags: [Usage]
+      summary: Sync model prices legacy alias
+      description: Legacy alias for /usage-stats/model-prices/sync.
+      requestBody:
+        $ref: "#/components/requestBodies/DynamicObject"
       responses:
         "200":
           $ref: "#/components/responses/DynamicObject"
@@ -1995,6 +2192,81 @@ components:
           type: string
           example: ok
       additionalProperties: true
+    UsageStatsStatus:
+      type: object
+      required: [enabled, open, model_prices_count]
+      properties:
+        enabled:
+          type: boolean
+        open:
+          type: boolean
+        path:
+          type: string
+        model_prices_count:
+          type: integer
+          description: Number of locally stored model price rows used for cost estimation.
+        model_prices_last_synced_at_ms:
+          type: integer
+          format: int64
+        model_prices_last_updated_at_ms:
+          type: integer
+          format: int64
+        model_prices_syncing:
+          type: boolean
+        model_prices_sync_error:
+          type: string
+      additionalProperties: true
+    UsageStatsEvent:
+      type: object
+      properties:
+        estimated_cost_usd:
+          type: number
+          format: double
+          nullable: true
+          description: Per-event estimated cost when a model price match is available.
+      additionalProperties: true
+    UsageStatsEventsResponse:
+      type: object
+      required: [events, limit, offset]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageStatsEvent"
+        limit:
+          type: integer
+        offset:
+          type: integer
+    UsageStatsModelPricesSyncRequest:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            type: string
+          description: Optional model IDs to sync. Empty means all LiteLLM token-priced models.
+        include_prices:
+          type: boolean
+          default: true
+          description: When false, omit the full model price table from the sync response.
+    UsageStatsModelPricesSyncResult:
+      type: object
+      required: [source, imported, skipped]
+      properties:
+        source:
+          type: string
+          example: litellm
+        imported:
+          type: integer
+        skipped:
+          type: integer
+        unmatched:
+          type: array
+          items:
+            type: string
+        prices:
+          type: object
+          additionalProperties: true
     ErrorResponse:
       type: object
       required: [error]

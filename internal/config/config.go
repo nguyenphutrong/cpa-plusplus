@@ -55,7 +55,8 @@ type Config struct {
 	// CommercialMode disables high-overhead HTTP middleware features to minimize per-request memory usage.
 	CommercialMode bool `yaml:"commercial-mode" json:"commercial-mode"`
 
-	// LoggingToFile controls whether application logs are written to rotating files or stdout.
+	// LoggingToFile controls application/runtime logrus output and /v0/management/logs.
+	// It does not control raw request debug logs or structured usage statistics.
 	LoggingToFile bool `yaml:"logging-to-file" json:"logging-to-file"`
 
 	// LogsMaxTotalSizeMB limits the total size (in MB) of log files under the logs directory.
@@ -66,14 +67,15 @@ type Config struct {
 	// When exceeded, the oldest error log files are deleted. Default is 10. Set to 0 to disable cleanup.
 	ErrorLogsMaxFiles int `yaml:"error-logs-max-files" json:"error-logs-max-files"`
 
-	// UsageStatisticsEnabled toggles in-memory usage aggregation; when false, usage data is discarded.
+	// UsageStatisticsEnabled toggles structured request usage statistics persistence
+	// and the legacy usage queue compatibility path. When false, usage data is discarded.
 	UsageStatisticsEnabled bool `yaml:"usage-statistics-enabled" json:"usage-statistics-enabled"`
 
 	// UsageStatisticsDBPath controls the embedded SQLite database used by built-in usage statistics.
 	// When empty, usage-statistics.sqlite is created next to the config file.
 	UsageStatisticsDBPath string `yaml:"usage-statistics-db-path" json:"usage-statistics-db-path"`
 
-	// RedisUsageQueueRetentionSeconds controls how long usage queue items are retained
+	// RedisUsageQueueRetentionSeconds controls how long legacy usage queue items are retained
 	// in memory for Management API consumers.
 	// Default: 60. Max: 3600.
 	RedisUsageQueueRetentionSeconds int `yaml:"redis-usage-queue-retention-seconds" json:"redis-usage-queue-retention-seconds"`

@@ -40,8 +40,9 @@ func mergeRecentRequestBuckets(dst, src []coreauth.RecentRequestBucket) []coreau
 	return dst
 }
 
-// GetAPIKeyUsage returns recent request buckets for all in-memory api_key auths,
-// grouped by provider and keyed by "base_url|api_key".
+// GetAPIKeyUsage returns the legacy in-memory request snapshot for api_key auths,
+// grouped by provider and keyed by "base_url|api_key". It does not replace the
+// SQLite-backed usage statistics endpoints.
 func (h *Handler) GetAPIKeyUsage(c *gin.Context) {
 	if h == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler not initialized"})

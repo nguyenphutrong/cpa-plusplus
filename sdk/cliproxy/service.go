@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -145,6 +146,13 @@ func (s *Service) configureUsageStats(cfg *config.Config) {
 	path := usagestats.ResolveSQLitePath(s.configPath, configuredPath)
 	if err := service.Configure(context.Background(), enabled, path); err != nil {
 		log.Warnf("failed to configure usage stats sqlite store; usage stats persistence disabled: %v", err)
+		service.StopModelPriceAutoSync()
+		return
+	}
+	if enabled {
+		service.StartModelPriceAutoSync(context.Background(), http.DefaultClient, usagestats.LiteLLMModelPricesURL, usagestats.ModelPriceAutoSyncInterval)
+	} else {
+		service.StopModelPriceAutoSync()
 	}
 }
 

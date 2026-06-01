@@ -21,6 +21,17 @@ func EstimateCostUSD(event Event, prices map[string]ModelPrice) float64 {
 		return 0
 	}
 	index := BuildModelPriceIndex(prices)
+	total, ok := EstimateCostUSDWithIndex(event, prices, index)
+	if !ok {
+		return 0
+	}
+	return total
+}
+
+func EstimateCostUSDWithIndex(event Event, prices map[string]ModelPrice, index *ModelPriceIndex) (float64, bool) {
+	if len(prices) == 0 {
+		return 0, false
+	}
 	price, ok := LookupModelPrice(index, prices, event.ResolvedModel)
 	if !ok {
 		price, ok = LookupModelPrice(index, prices, event.Model)
@@ -29,7 +40,7 @@ func EstimateCostUSD(event Event, prices map[string]ModelPrice) float64 {
 		price, ok = LookupModelPrice(index, prices, event.RequestedModel)
 	}
 	if !ok {
-		return 0
+		return 0, false
 	}
 
 	cachedTokens := maxInt64(event.CachedTokens, event.CacheTokens)
@@ -40,10 +51,10 @@ func EstimateCostUSD(event Event, prices map[string]ModelPrice) float64 {
 	total := (float64(promptTokens) / tokensPerPriceUnit * price.Prompt) +
 		(float64(cachedTokens) / tokensPerPriceUnit * price.Cache) +
 		(float64(completionTokens) / tokensPerPriceUnit * price.Completion)
-	if math.IsNaN(total) || math.IsInf(total, 0) || total <= 0 {
-		return 0
+	if math.IsNaN(total) || math.IsInf(total, 0) || total < 0 {
+		return 0, false
 	}
-	return total
+	return total, true
 }
 
 func BuildModelPriceIndex(prices map[string]ModelPrice) *ModelPriceIndex {

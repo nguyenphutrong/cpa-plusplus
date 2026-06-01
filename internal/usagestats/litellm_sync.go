@@ -36,6 +36,17 @@ func SyncLiteLLMModelPrices(
 	sourceURL string,
 	models []string,
 ) (ModelPriceSyncResult, error) {
+	return SyncLiteLLMModelPricesWithOptions(ctx, store, client, sourceURL, models, true)
+}
+
+func SyncLiteLLMModelPricesWithOptions(
+	ctx context.Context,
+	store ModelPriceSyncStore,
+	client *http.Client,
+	sourceURL string,
+	models []string,
+	includePrices bool,
+) (ModelPriceSyncResult, error) {
 	if store == nil {
 		return ModelPriceSyncResult{}, errors.New("usage stats model price store is required")
 	}
@@ -49,9 +60,12 @@ func SyncLiteLLMModelPrices(
 	if err != nil {
 		return ModelPriceSyncResult{}, err
 	}
-	prices, err := store.LoadModelPrices(ctx)
-	if err != nil {
-		return ModelPriceSyncResult{}, err
+	var prices map[string]ModelPrice
+	if includePrices {
+		prices, err = store.LoadModelPrices(ctx)
+		if err != nil {
+			return ModelPriceSyncResult{}, err
+		}
 	}
 	return ModelPriceSyncResult{
 		Source:    ModelPriceSyncSource,

@@ -22,7 +22,8 @@ const (
 	logScannerMaxBuffer     = 8 * 1024 * 1024
 )
 
-// GetLogs returns log lines with optional incremental loading.
+// GetLogs returns application/runtime log lines with optional incremental loading.
+// Request-level usage analytics should use /v0/management/usage-stats/* instead.
 func (h *Handler) GetLogs(c *gin.Context) {
 	if h == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler unavailable"})
@@ -33,7 +34,7 @@ func (h *Handler) GetLogs(c *gin.Context) {
 		return
 	}
 	if !h.cfg.LoggingToFile {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "logging to file disabled"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "logging to file disabled", "message": "application log file output is disabled"})
 		return
 	}
 
@@ -84,7 +85,7 @@ func (h *Handler) GetLogs(c *gin.Context) {
 	})
 }
 
-// DeleteLogs removes all rotated log files and truncates the active log.
+// DeleteLogs removes application/runtime rotated log files and truncates the active log.
 func (h *Handler) DeleteLogs(c *gin.Context) {
 	if h == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler unavailable"})
@@ -95,7 +96,7 @@ func (h *Handler) DeleteLogs(c *gin.Context) {
 		return
 	}
 	if !h.cfg.LoggingToFile {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "logging to file disabled"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "logging to file disabled", "message": "application log file output is disabled"})
 		return
 	}
 
@@ -145,7 +146,7 @@ func (h *Handler) DeleteLogs(c *gin.Context) {
 	})
 }
 
-// GetRequestErrorLogs lists error request log files when RequestLog is disabled.
+// GetRequestErrorLogs lists raw request debug error log files when RequestLog is disabled.
 // It returns an empty list when RequestLog is enabled.
 func (h *Handler) GetRequestErrorLogs(c *gin.Context) {
 	if h == nil {
@@ -209,7 +210,7 @@ func (h *Handler) GetRequestErrorLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"files": files})
 }
 
-// GetRequestLogByID finds and downloads a request log file by its request ID.
+// GetRequestLogByID finds and downloads a raw request debug log file by its request ID.
 // The ID is matched against the suffix of log file names (format: *-{requestID}.log).
 func (h *Handler) GetRequestLogByID(c *gin.Context) {
 	if h == nil {
@@ -297,7 +298,7 @@ func (h *Handler) GetRequestLogByID(c *gin.Context) {
 	c.FileAttachment(fullPath, matchedFile)
 }
 
-// DownloadRequestErrorLog downloads a specific error request log file by name.
+// DownloadRequestErrorLog downloads a specific raw request debug error log file by name.
 func (h *Handler) DownloadRequestErrorLog(c *gin.Context) {
 	if h == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler unavailable"})

@@ -20,6 +20,24 @@ func TestEstimateCostUSDUsesResolvedThenRequestedModel(t *testing.T) {
 	if got != want {
 		t.Fatalf("EstimateCostUSD() = %v, want %v", got, want)
 	}
+
+	index := BuildModelPriceIndex(prices)
+	indexed, ok := EstimateCostUSDWithIndex(Event{
+		Model:            "alias",
+		RequestedModel:   "alias",
+		ResolvedModel:    "gpt-5",
+		PromptTokens:     1_000_000,
+		CompletionTokens: 500_000,
+		CachedTokens:     100_000,
+	}, prices, index)
+	if !ok || indexed != want {
+		t.Fatalf("EstimateCostUSDWithIndex() = %v, %v; want %v, true", indexed, ok, want)
+	}
+
+	_, ok = EstimateCostUSDWithIndex(Event{ResolvedModel: "missing"}, prices, index)
+	if ok {
+		t.Fatal("missing model should not return cost")
+	}
 }
 
 func TestLookupModelPriceMatchesProviderPrefixAndDateSuffix(t *testing.T) {

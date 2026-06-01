@@ -18,6 +18,12 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
+type ModelPriceStoreStatus struct {
+	Count          int
+	LastUpdatedMS  int64
+	LastSyncedAtMS int64
+}
+
 func OpenSQLiteStore(path string) (*SQLiteStore, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -305,6 +311,26 @@ func (s *SQLiteStore) LoadModelPrices(ctx context.Context) (map[string]ModelPric
 	return prices, rows.Err()
 }
 
+func (s *SQLiteStore) ModelPriceStatus(ctx context.Context) (ModelPriceStoreStatus, error) {
+	var status ModelPriceStoreStatus
+	var lastUpdated, lastSynced sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `select count(*), max(updated_at_ms), max(synced_at_ms) from model_prices`).Scan(
+		&status.Count,
+		&lastUpdated,
+		&lastSynced,
+	)
+	if err != nil {
+		return ModelPriceStoreStatus{}, err
+	}
+	if lastUpdated.Valid {
+		status.LastUpdatedMS = lastUpdated.Int64
+	}
+	if lastSynced.Valid {
+		status.LastSyncedAtMS = lastSynced.Int64
+	}
+	return status, nil
+}
+
 func (s *SQLiteStore) SaveModelPrices(ctx context.Context, prices map[string]ModelPrice) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -410,13 +436,16 @@ func (s *SQLiteStore) estimateCostForFilter(ctx context.Context, filter SummaryF
 	if len(prices) == 0 {
 		return 0, nil
 	}
+	index := BuildModelPriceIndex(prices)
 	events, err := s.QueryEvents(ctx, filter, int(^uint(0)>>1), 0)
 	if err != nil {
 		return 0, err
 	}
 	var total float64
 	for _, event := range events {
-		total += EstimateCostUSD(event, prices)
+		if cost, ok := EstimateCostUSDWithIndex(event, prices, index); ok {
+			total += cost
+		}
 	}
 	return total, nil
 }

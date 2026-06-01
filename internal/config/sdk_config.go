@@ -28,7 +28,8 @@ type SDKConfig struct {
 	// credentials as well.
 	ForceModelPrefix bool `yaml:"force-model-prefix" json:"force-model-prefix"`
 
-	// RequestLog enables or disables detailed request logging functionality.
+	// RequestLog enables high-overhead raw request/response debug logs.
+	// It is separate from application logs and structured usage statistics.
 	RequestLog bool `yaml:"request-log" json:"request-log"`
 
 	// APIKeys is a list of keys for authenticating clients to this proxy server.

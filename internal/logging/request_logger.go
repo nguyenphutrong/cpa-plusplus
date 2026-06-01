@@ -1,6 +1,7 @@
-// Package logging provides request logging functionality for the CLI Proxy API server.
-// It handles capturing and storing detailed HTTP request and response data when enabled
-// through configuration, supporting both regular and streaming responses.
+// Package logging provides raw request/response debug logging for the CLI Proxy API server.
+// It handles capturing and storing detailed HTTP traffic when enabled through configuration,
+// supporting both regular and streaming responses. These logs are separate from structured
+// usage statistics and are not intended for request analytics.
 package logging
 
 import (
@@ -41,7 +42,7 @@ var currentHomeRequestLogClient = func() homeRequestLogClient {
 	return home.Current()
 }
 
-// RequestLogger defines the interface for logging HTTP requests and responses.
+// RequestLogger defines the interface for high-overhead raw HTTP request/response debug logs.
 // It provides methods for logging both regular and streaming HTTP request/response cycles.
 type RequestLogger interface {
 	// LogRequest logs a complete non-streaming request/response cycle.

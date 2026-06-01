@@ -1,6 +1,7 @@
 package management
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -19,7 +20,8 @@ type usageStatsModelPricesRequest struct {
 }
 
 type usageStatsModelPricesSyncRequest struct {
-	Models []string `json:"models"`
+	Models        []string `json:"models"`
+	IncludePrices *bool    `json:"include_prices"`
 }
 
 func (h *Handler) GetUsageStatsStatus(c *gin.Context) {
@@ -30,6 +32,7 @@ func (h *Handler) GetUsageStatsStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, service.Status())
 }
 
+// GetUsageStatsEvents is the primary backend surface for request-level usage event UIs.
 func (h *Handler) GetUsageStatsEvents(c *gin.Context) {
 	service := h.requireUsageStats(c)
 	if service == nil {
@@ -50,6 +53,7 @@ func (h *Handler) GetUsageStatsEvents(c *gin.Context) {
 		writeUsageStatsError(c, err)
 		return
 	}
+	attachUsageStatsEventCosts(c.Request.Context(), service, events)
 	c.JSON(http.StatusOK, gin.H{
 		"events": events,
 		"limit":  limit,
@@ -57,6 +61,7 @@ func (h *Handler) GetUsageStatsEvents(c *gin.Context) {
 	})
 }
 
+// GetUsageStatsSummary is the primary backend surface for aggregated usage statistics UIs.
 func (h *Handler) GetUsageStatsSummary(c *gin.Context) {
 	service := h.requireUsageStats(c)
 	if service == nil {
@@ -125,11 +130,16 @@ func (h *Handler) PostUsageStatsModelPricesSync(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_body", "message": err.Error()})
 		return
 	}
-	result, err := service.SyncLiteLLMModelPrices(
+	includePrices := true
+	if req.IncludePrices != nil {
+		includePrices = *req.IncludePrices
+	}
+	result, err := service.SyncLiteLLMModelPricesWithOptions(
 		c.Request.Context(),
 		http.DefaultClient,
 		liteLLMModelPricesURL,
 		req.Models,
+		includePrices,
 	)
 	if err != nil {
 		if errors.Is(err, usagestats.ErrDisabled) {
@@ -140,6 +150,22 @@ func (h *Handler) PostUsageStatsModelPricesSync(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func attachUsageStatsEventCosts(ctx context.Context, service *usagestats.Service, events []usagestats.Event) {
+	if len(events) == 0 || service == nil {
+		return
+	}
+	prices, err := service.LoadModelPrices(ctx)
+	if err != nil || len(prices) == 0 {
+		return
+	}
+	index := usagestats.BuildModelPriceIndex(prices)
+	for i := range events {
+		if cost, ok := usagestats.EstimateCostUSDWithIndex(events[i], prices, index); ok {
+			events[i].EstimatedCostUSD = &cost
+		}
+	}
 }
 
 func (h *Handler) requireUsageStats(c *gin.Context) *usagestats.Service {

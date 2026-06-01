@@ -241,6 +241,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// Add middleware
 	engine.Use(logging.GinLogrusLogger())
 	engine.Use(logging.GinLogrusRecovery())
+	engine.Use(closeHTTP1ConnectionsMiddleware())
 	for _, mw := range optionState.extraMiddleware {
 		engine.Use(mw)
 	}
@@ -378,6 +379,33 @@ func (s *Server) homeHeartbeatMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func closeHTTP1ConnectionsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c != nil && c.Request != nil && c.Request.ProtoMajor == 1 && !isWebSocketUpgrade(c.Request) {
+			c.Request.Close = true
+			c.Header("Connection", "close")
+		}
+		c.Next()
+	}
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") {
+		return false
+	}
+	for _, value := range r.Header.Values("Connection") {
+		for _, part := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // setupRoutes configures the API routes for the server.

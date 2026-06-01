@@ -121,7 +121,7 @@ func isDirWritable(dir string) bool {
 	return true
 }
 
-// ResolveLogDirectory determines the directory used for application logs.
+// ResolveLogDirectory determines the directory used for application/runtime logs.
 func ResolveLogDirectory(cfg *config.Config) string {
 	logDir := "logs"
 	if base := util.WritablePath(); base != "" {
@@ -142,7 +142,8 @@ func ResolveLogDirectory(cfg *config.Config) string {
 	return logDir
 }
 
-// ConfigureLogOutput switches the global log destination between rotating files and stdout.
+// ConfigureLogOutput switches application/runtime logrus output between rotating files and stdout.
+// It does not control raw request debug logs or structured usage statistics.
 // When logsMaxTotalSizeMB > 0, a background cleaner removes the oldest log files in the logs directory
 // until the total size is within the limit.
 func ConfigureLogOutput(cfg *config.Config) error {

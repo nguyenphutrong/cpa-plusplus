@@ -28,6 +28,7 @@ type Event struct {
 	LatencyMS        *int64
 	Failed           bool
 	CreatedAtMS      int64
+	EstimatedCostUSD *float64 `json:"estimated_cost_usd,omitempty"`
 }
 
 type Tokens struct {

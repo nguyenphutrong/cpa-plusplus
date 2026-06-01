@@ -110,6 +110,14 @@ func TestSQLiteStoreModelPricesAndCostSummary(t *testing.T) {
 	if prices["gpt-5"].Prompt != 10 {
 		t.Fatalf("prices = %#v", prices)
 	}
+
+	status, err := store.ModelPriceStatus(ctx)
+	if err != nil {
+		t.Fatalf("ModelPriceStatus: %v", err)
+	}
+	if status.Count != 1 || status.LastUpdatedMS <= 0 {
+		t.Fatalf("model price status = %#v", status)
+	}
 }
 
 func openTestStore(t *testing.T) *SQLiteStore {

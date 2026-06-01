@@ -1,10 +1,14 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,6 +89,96 @@ func TestHealthz(t *testing.T) {
 			t.Fatalf("expected empty body for HEAD request, got %q", rr.Body.String())
 		}
 	})
+}
+
+func TestHTTP1ResponsesCloseClientConnections(t *testing.T) {
+	server := newTestServer(t)
+
+	t.Run("non-stream", func(t *testing.T) {
+		assertHTTP1RequestClosesConnection(t, server.engine, "/healthz")
+	})
+
+	t.Run("stream", func(t *testing.T) {
+		server.engine.GET("/test-stream", func(c *gin.Context) {
+			c.Header("Content-Type", "text/event-stream")
+			c.Header("Cache-Control", "no-cache")
+			_, _ = c.Writer.Write([]byte("data: ok\n\n"))
+			if flusher, ok := c.Writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		})
+		assertHTTP1RequestClosesConnection(t, server.engine, "/test-stream")
+	})
+}
+
+func TestCloseHTTP1ConnectionsMiddlewareSkipsHTTP2AndWebSocket(t *testing.T) {
+	server := newTestServer(t)
+
+	h2Req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	h2Req.Proto = "HTTP/2.0"
+	h2Req.ProtoMajor = 2
+	h2Req.ProtoMinor = 0
+	h2RR := httptest.NewRecorder()
+	server.engine.ServeHTTP(h2RR, h2Req)
+	if got := h2RR.Header().Get("Connection"); got != "" {
+		t.Fatalf("HTTP/2 Connection header = %q, want empty", got)
+	}
+
+	wsReq := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	wsReq.Header.Set("Upgrade", "websocket")
+	wsReq.Header.Set("Connection", "Upgrade")
+	wsRR := httptest.NewRecorder()
+	server.engine.ServeHTTP(wsRR, wsReq)
+	if got := wsRR.Header().Get("Connection"); got != "" {
+		t.Fatalf("websocket upgrade Connection header = %q, want empty", got)
+	}
+}
+
+func assertHTTP1RequestClosesConnection(t *testing.T, handler http.Handler, path string) {
+	t.Helper()
+
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	parsed, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+
+	conn, err := net.Dial("tcp", parsed.Host)
+	if err != nil {
+		t.Fatalf("dial test server: %v", err)
+	}
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+	_, err = conn.Write([]byte("GET " + path + " HTTP/1.1\r\nHost: " + parsed.Host + "\r\n\r\n"))
+	if err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	// http.ReadResponse consumes and strips Connection: close from Header,
+	// exposing it as Response.Close instead.
+	if !resp.Close {
+		t.Fatalf("response Close = false, want true")
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if errClose := resp.Body.Close(); errClose != nil {
+		t.Fatalf("close response body: %v", errClose)
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	if _, err := reader.Peek(1); err == nil {
+		t.Fatal("connection remained readable after response; want server close")
+	} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		t.Fatalf("connection stayed open until timeout; want server close")
+	}
 }
 
 func TestManagementUsageRequiresManagementAuthAndPopsArray(t *testing.T) {
