@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -284,6 +285,91 @@ func TestManagementVirtualModelsRoutes(t *testing.T) {
 	server.engine.ServeHTTP(patchRR, patchReq)
 	if patchRR.Code != http.StatusOK {
 		t.Fatalf("PATCH virtual-models/enabled status = %d body=%s", patchRR.Code, patchRR.Body.String())
+	}
+}
+
+func TestManagementProviderEnabledModelsRoutes(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
+
+	tmpDir := t.TempDir()
+	authDir := filepath.Join(tmpDir, "auth")
+	if err := os.MkdirAll(authDir, 0o700); err != nil {
+		t.Fatalf("create auth dir: %v", err)
+	}
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("port: 0\n"), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg := &proxyconfig.Config{
+		SDKConfig: sdkconfig.SDKConfig{
+			APIKeys: []string{"test-key"},
+		},
+		Port:                   0,
+		AuthDir:                authDir,
+		Debug:                  true,
+		LoggingToFile:          false,
+		UsageStatisticsEnabled: false,
+	}
+	authManager := auth.NewManager(nil, nil, nil)
+	registeredAuth := &auth.Auth{
+		ID:       "route-enabled-gemini-auth",
+		Provider: "gemini",
+		Metadata: map[string]any{"email": "dev@example.com"},
+	}
+	if _, err := authManager.Register(context.Background(), registeredAuth); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+	registry.GetGlobalRegistry().RegisterClient(registeredAuth.ID, "gemini", []*registry.ModelInfo{
+		{ID: "gemini-a", Object: "model", OwnedBy: "google", Type: "gemini"},
+		{ID: "gemini-b", Object: "model", OwnedBy: "google", Type: "gemini"},
+	})
+	t.Cleanup(func() {
+		registry.GetGlobalRegistry().UnregisterClient(registeredAuth.ID)
+	})
+
+	server := NewServer(cfg, authManager, sdkaccess.NewManager(), configPath)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/v0/management/providers/gemini/enabled-models", strings.NewReader(`{"enabled_models":["gemini/gemini-a"]}`))
+	putReq.Header.Set("Authorization", "Bearer test-management-key")
+	putReq.Header.Set("Content-Type", "application/json")
+	putRR := httptest.NewRecorder()
+	server.engine.ServeHTTP(putRR, putReq)
+	if putRR.Code != http.StatusOK {
+		t.Fatalf("PUT enabled-models status = %d body=%s", putRR.Code, putRR.Body.String())
+	}
+	if got := server.cfg.OAuthExcludedModels["gemini"]; len(got) != 1 || got[0] != "gemini-b" {
+		t.Fatalf("gemini exclusions = %#v", got)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v0/management/providers/gemini-cli/enabled-models", nil)
+	getReq.Header.Set("Authorization", "Bearer test-management-key")
+	getRR := httptest.NewRecorder()
+	server.engine.ServeHTTP(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("GET enabled-models status = %d body=%s", getRR.Code, getRR.Body.String())
+	}
+	var payload struct {
+		ProviderID    string   `json:"provider_id"`
+		EnabledModels []string `json:"enabled_models"`
+	}
+	if err := json.Unmarshal(getRR.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode GET enabled-models: %v body=%s", err, getRR.Body.String())
+	}
+	if payload.ProviderID != "gemini" || len(payload.EnabledModels) != 1 || payload.EnabledModels[0] != "gemini-a" {
+		t.Fatalf("enabled response = %#v", payload)
+	}
+
+	clearReq := httptest.NewRequest(http.MethodPut, "/v0/management/providers/gemini/enabled-models", strings.NewReader(`{"enabled_models":null}`))
+	clearReq.Header.Set("Authorization", "Bearer test-management-key")
+	clearReq.Header.Set("Content-Type", "application/json")
+	clearRR := httptest.NewRecorder()
+	server.engine.ServeHTTP(clearRR, clearReq)
+	if clearRR.Code != http.StatusOK {
+		t.Fatalf("clear enabled-models status = %d body=%s", clearRR.Code, clearRR.Body.String())
+	}
+	if server.cfg.OAuthExcludedModels != nil {
+		t.Fatalf("exclusions after clear = %#v, want nil", server.cfg.OAuthExcludedModels)
 	}
 }
 
