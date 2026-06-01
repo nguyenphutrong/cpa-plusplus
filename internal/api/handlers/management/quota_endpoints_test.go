@@ -97,6 +97,38 @@ func TestPostQuotaRefreshSingleCredentialStatuses(t *testing.T) {
 	}
 }
 
+func TestPostQuotaRefreshProviderIsBestEffort(t *testing.T) {
+	router, manager := testQuotaRouter(t)
+	if _, err := manager.Register(context.Background(), &coreauth.Auth{
+		ID:       "codex-auth",
+		Provider: "codex",
+		Metadata: map[string]any{
+			"type": "codex",
+		},
+	}); err != nil {
+		t.Fatalf("register auth: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v0/management/quota/refresh/codex", nil)
+	req.Header.Set("Authorization", "Bearer test-management-key")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"quota_status":"error"`) {
+		t.Fatalf("body = %s, want cached provider refresh error", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v0/management/quota/refresh/xai", nil)
+	req.Header.Set("Authorization", "Bearer test-management-key")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("unsupported status = %d, want %d body=%s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+}
+
 func TestRenameKiroAuthRecordWithEmailRenamesARNFile(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
 	gin.SetMode(gin.TestMode)
@@ -168,6 +200,7 @@ func testQuotaRouter(t *testing.T) (*gin.Engine, *coreauth.Manager) {
 	group.GET("/copilot-quota", handler.GetCopilotQuota)
 	group.GET("/kiro-quota", handler.GetKiroQuota)
 	group.POST("/quota/refresh", handler.PostQuotaRefresh)
+	group.POST("/quota/refresh/:provider", handler.PostQuotaRefresh)
 	group.POST("/quota/refresh/:provider/:authID", handler.PostQuotaRefresh)
 	return router, manager
 }

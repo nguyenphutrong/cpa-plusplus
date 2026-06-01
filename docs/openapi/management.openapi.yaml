@@ -362,6 +362,23 @@ paths:
                 $ref: "#/components/schemas/QuotaView"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /quota/refresh/{provider}:
+    post:
+      tags: [Quota]
+      summary: Refresh quota for one provider
+      parameters:
+        - $ref: "#/components/parameters/ProviderPath"
+      responses:
+        "200":
+          description: Refreshed quota view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaView"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /quota/refresh/{provider}/{authID}:
     post:
       tags: [Quota]

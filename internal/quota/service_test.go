@@ -51,6 +51,85 @@ func TestSyncCredentialPersistsQuotaDataInAuthMetadata(t *testing.T) {
 	}
 }
 
+func TestSyncProviderSyncsOnlyMatchingEnabledProvider(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	auths := []*coreauth.Auth{
+		{
+			ID:         "codex-auth",
+			Provider:   "codex",
+			Attributes: map[string]string{"api_key": "codex-token"},
+			Metadata:   map[string]any{},
+		},
+		{
+			ID:         "codex-disabled",
+			Provider:   "codex",
+			Disabled:   true,
+			Attributes: map[string]string{"api_key": "disabled-token"},
+			Metadata:   map[string]any{},
+		},
+		{
+			ID:         "kiro-auth",
+			Provider:   "kiro",
+			Attributes: map[string]string{"api_key": "kiro-token"},
+			Metadata:   map[string]any{},
+		},
+	}
+	for _, auth := range auths {
+		if _, err := manager.Register(context.Background(), auth); err != nil {
+			t.Fatalf("register auth %s: %v", auth.ID, err)
+		}
+	}
+
+	var codexFetches int
+	var kiroFetches int
+	service := NewSyncService(manager, nil)
+	service.SetFetchOverride(map[string]providers.QuotaFetchFunc{
+		"codex": func(_ context.Context, input providers.QuotaFetchInput) (storage.QuotaData, error) {
+			codexFetches++
+			if input.CredentialID != "codex-auth" {
+				t.Fatalf("credential id = %q, want codex-auth", input.CredentialID)
+			}
+			return storage.QuotaData{
+				ProviderData: &storage.ProviderQuotaData{
+					PlanType: "plus",
+				},
+			}, nil
+		},
+		"kiro": func(context.Context, providers.QuotaFetchInput) (storage.QuotaData, error) {
+			kiroFetches++
+			return storage.QuotaData{}, nil
+		},
+	})
+
+	if _, err := service.SyncProvider(context.Background(), "codex"); err != nil {
+		t.Fatalf("sync provider: %v", err)
+	}
+	if codexFetches != 1 {
+		t.Fatalf("codex fetches = %d, want 1", codexFetches)
+	}
+	if kiroFetches != 0 {
+		t.Fatalf("kiro fetches = %d, want 0", kiroFetches)
+	}
+
+	updated, ok := manager.GetByID("codex-auth")
+	if !ok {
+		t.Fatal("updated codex auth not found")
+	}
+	cached := CachedQuotaData(updated)
+	if cached.ProviderData == nil || cached.ProviderData.PlanType != "plus" {
+		t.Fatalf("cached quota = %#v", cached)
+	}
+
+	disabled, _ := manager.GetByID("codex-disabled")
+	if cached := CachedQuotaData(disabled); cached.ProviderData != nil {
+		t.Fatalf("disabled cached quota = %#v, want none", cached)
+	}
+	kiro, _ := manager.GetByID("kiro-auth")
+	if cached := CachedQuotaData(kiro); cached.ProviderData != nil {
+		t.Fatalf("kiro cached quota = %#v, want none", cached)
+	}
+}
+
 func TestSyncCredentialPersistsProviderAccountLabelAsEmail(t *testing.T) {
 	manager := coreauth.NewManager(nil, nil, nil)
 	auth := &coreauth.Auth{

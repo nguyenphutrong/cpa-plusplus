@@ -96,6 +96,16 @@ func (h *Handler) PostQuotaRefresh(c *gin.Context) {
 		c.JSON(http.StatusOK, quota.BuildQuotaView(service.Auths(), service.SupportsProvider))
 		return
 	}
+	if provider != "" && authID == "" {
+		if capability := quota.SupportsProvider(provider); !capability.Supported {
+			c.JSON(http.StatusConflict, gin.H{"error": capability.Reason})
+			return
+		}
+		_, _ = service.SyncProvider(c.Request.Context(), provider)
+		h.renameKiroAuthRecordsWithEmail(c.Request.Context(), service.Auths())
+		c.JSON(http.StatusOK, quota.BuildQuotaView(service.Auths(), service.SupportsProvider))
+		return
+	}
 	if provider == "" || authID == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "credential not found"})
 		return

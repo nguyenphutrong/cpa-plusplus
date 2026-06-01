@@ -68,6 +68,26 @@ func (s *SyncService) SyncAll(ctx context.Context) (QuotaView, error) {
 	return BuildQuotaView(s.Auths(), s.SupportsProvider), firstErr
 }
 
+func (s *SyncService) SyncProvider(ctx context.Context, provider string) (QuotaView, error) {
+	providerKey := ProviderKeyForName(provider)
+	var firstErr error
+	for _, auth := range s.Auths() {
+		if auth == nil || auth.Disabled || auth.Status == coreauth.StatusDisabled {
+			continue
+		}
+		if ProviderKey(auth) != providerKey {
+			continue
+		}
+		if !s.SupportsProvider(providerKey) {
+			continue
+		}
+		if _, err := s.SyncCredential(ctx, auth); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return BuildQuotaView(s.Auths(), s.SupportsProvider), firstErr
+}
+
 func (s *SyncService) SyncCredential(ctx context.Context, auth *coreauth.Auth) (storage.QuotaData, error) {
 	if s == nil || auth == nil {
 		return storage.QuotaData{}, fmt.Errorf("quota sync is not configured")

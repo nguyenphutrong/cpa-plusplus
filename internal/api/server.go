@@ -703,6 +703,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/quota/summary", s.mgmt.GetQuotaSummary)
 		mgmt.GET("/quota/providers/:provider", s.mgmt.GetProviderQuota)
 		mgmt.POST("/quota/refresh", s.mgmt.PostQuotaRefresh)
+		mgmt.POST("/quota/refresh/:provider", s.mgmt.PostQuotaRefresh)
 		mgmt.POST("/quota/refresh/:provider/:authID", s.mgmt.PostQuotaRefresh)
 		mgmt.GET("/copilot-quota", s.mgmt.GetCopilotQuota)
 		mgmt.GET("/kiro-quota", s.mgmt.GetKiroQuota)
