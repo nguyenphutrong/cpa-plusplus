@@ -2,6 +2,8 @@ package kiro
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -101,6 +103,43 @@ func TestBuildSignInAuthURL(t *testing.T) {
 	}
 }
 
+func TestPollDeviceTokenUsesAccessTokenClaimsForIdentity(t *testing.T) {
+	accessToken := fakeJWT(t, map[string]any{
+		"email":              "dev@example.com",
+		"preferred_username": "dev-user",
+		"sub":                "subject-1",
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/token" {
+			t.Fatalf("path = %q", req.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"accessToken":"` + accessToken + `","refreshToken":"refresh-token","profileArn":"arn:aws:kiro:us-east-1:123:profile/dev","expiresIn":3600}`))
+	}))
+	defer server.Close()
+
+	origOIDCBaseURL := OIDCBaseURL
+	OIDCBaseURL = server.URL
+	t.Cleanup(func() { OIDCBaseURL = origOIDCBaseURL })
+
+	result := NewService(server.Client()).PollDeviceToken(context.Background(), "us-east-1", "client-id", "client-secret", "device-code")
+	if result.Err != nil {
+		t.Fatalf("PollDeviceToken: %v", result.Err)
+	}
+	if result.Bundle == nil {
+		t.Fatal("expected token bundle")
+	}
+	if result.Bundle.Email != "dev@example.com" {
+		t.Fatalf("email = %q", result.Bundle.Email)
+	}
+	if result.Bundle.Username != "dev-user" {
+		t.Fatalf("username = %q", result.Bundle.Username)
+	}
+	if result.Bundle.Subject != "subject-1" {
+		t.Fatalf("subject = %q", result.Bundle.Subject)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -114,4 +153,13 @@ func roundTripRewriteHost(target string) roundTripFunc {
 		clone.URL.Host = strings.TrimPrefix(target, "http://")
 		return http.DefaultTransport.RoundTrip(clone)
 	}
+}
+
+func fakeJWT(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	rawClaims, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+	return "header." + base64.RawURLEncoding.EncodeToString(rawClaims) + ".signature"
 }

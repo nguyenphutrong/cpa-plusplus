@@ -247,6 +247,7 @@ func (s *Service) PollDeviceToken(ctx context.Context, region, clientID, clientS
 			return DevicePollResult{Err: fmt.Errorf("kiro device token polling failed: %s %s", payload.Error, payload.ErrorDescription)}
 		}
 	}
+	claims := parseJWTClaims(payload.AccessToken)
 	return DevicePollResult{Bundle: &TokenBundle{
 		AccessToken:  payload.AccessToken,
 		RefreshToken: payload.RefreshToken,
@@ -255,6 +256,12 @@ func (s *Service) PollDeviceToken(ctx context.Context, region, clientID, clientS
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		Region:       region,
+		Email:        claimString(claims, "email"),
+		Username: firstNonEmpty(
+			claimString(claims, "username"),
+			claimString(claims, "preferred_username"),
+		),
+		Subject: claimString(claims, "sub"),
 	}}
 }
 
@@ -379,7 +386,7 @@ func (s *Service) ExchangeSocialCode(ctx context.Context, code, codeVerifier, re
 			claimString(claims, "username"),
 			claimString(claims, "preferred_username"),
 		),
-		Subject: claimString(claims, "sub"),
+		Subject: firstNonEmpty(tokenResp.Subject, claimString(claims, "sub")),
 	}, nil
 }
 

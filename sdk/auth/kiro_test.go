@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,42 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
+
+func TestBuildKiroAuthRecordAvoidsGenericAccountIDCollisions(t *testing.T) {
+	first := BuildKiroAuthRecord(&kiroauth.TokenBundle{
+		AccessToken:  "access-1",
+		RefreshToken: "refresh-1",
+	}, "signin_localhost")
+	second := BuildKiroAuthRecord(&kiroauth.TokenBundle{
+		AccessToken:  "access-2",
+		RefreshToken: "refresh-2",
+	}, "signin_localhost")
+	repeated := BuildKiroAuthRecord(&kiroauth.TokenBundle{
+		AccessToken:  "access-1",
+		RefreshToken: "refresh-1",
+	}, "signin_localhost")
+
+	if first.ID == "kiro-signin_localhost-account.json" {
+		t.Fatalf("generic Kiro auth ID was reused: %q", first.ID)
+	}
+	if first.ID == second.ID {
+		t.Fatalf("Kiro auth IDs collided: %q", first.ID)
+	}
+	if repeated.ID != first.ID {
+		t.Fatalf("same fallback credentials produced unstable ID: got %q want %q", repeated.ID, first.ID)
+	}
+	if !strings.HasPrefix(first.ID, "kiro-signin_localhost-account-") {
+		t.Fatalf("fallback Kiro auth ID = %q", first.ID)
+	}
+
+	withEmail := BuildKiroAuthRecord(&kiroauth.TokenBundle{
+		Email:        "dev@example.com",
+		RefreshToken: "refresh-1",
+	}, "signin_localhost")
+	if withEmail.ID != "kiro-signin_localhost-dev-example.com.json" {
+		t.Fatalf("email-based Kiro auth ID = %q", withEmail.ID)
+	}
+}
 
 func TestRefreshKiroTokenPersistsProfileMetadata(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

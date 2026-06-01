@@ -2,6 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -154,7 +157,7 @@ func BuildKiroAuthRecord(bundle *kiro.TokenBundle, source string) *coreauth.Auth
 		source = "aws-device"
 	}
 	label := "kiro-" + source
-	idPart := sanitizeKiroIdentifier(firstKiroNonEmpty(bundle.Email, bundle.Username, bundle.Subject, bundle.ProfileARN, bundle.ClientID, "account"))
+	idPart := kiroAuthRecordIDPart(bundle)
 	fileName := fmt.Sprintf("%s-%s.json", label, idPart)
 	now := time.Now().UTC()
 	expiresAt := bundle.ExpiresAt
@@ -192,6 +195,40 @@ func BuildKiroAuthRecord(bundle *kiro.TokenBundle, source string) *coreauth.Auth
 		},
 		NextRefreshAfter: expiresAt.Add(-20 * time.Minute),
 	}
+}
+
+func kiroAuthRecordIDPart(bundle *kiro.TokenBundle) string {
+	if bundle == nil {
+		return "account-" + randomKiroIdentifierSuffix()
+	}
+	identity := firstKiroNonEmpty(bundle.Email, bundle.Username, bundle.Subject, bundle.ProfileARN, bundle.ClientID)
+	if identity != "" {
+		return sanitizeKiroIdentifier(identity)
+	}
+	if fingerprint := kiroTokenFingerprint(bundle.RefreshToken, bundle.AccessToken); fingerprint != "" {
+		return "account-" + fingerprint
+	}
+	return "account-" + randomKiroIdentifierSuffix()
+}
+
+func kiroTokenFingerprint(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		sum := sha256.Sum256([]byte("kiro-auth-record:" + value))
+		return hex.EncodeToString(sum[:])[:16]
+	}
+	return ""
+}
+
+func randomKiroIdentifierSuffix() string {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return hex.EncodeToString(raw[:])
+	}
+	return fmt.Sprintf("%d", time.Now().UTC().UnixNano())
 }
 
 func RefreshKiroToken(ctx context.Context, cfg *config.Config, auth *coreauth.Auth) (*coreauth.Auth, error) {
