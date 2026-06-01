@@ -299,3 +299,17 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 
 	return nil
 }
+
+func lookupStaticModelInfoByProvider(modelID, provider string) *ModelInfo {
+	modelID = strings.TrimSpace(modelID)
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if modelID == "" || provider == "" {
+		return nil
+	}
+	for _, model := range GetStaticModelDefinitionsByChannel(provider) {
+		if model != nil && model.ID == modelID {
+			return cloneModelInfo(model)
+		}
+	}
+	return nil
+}

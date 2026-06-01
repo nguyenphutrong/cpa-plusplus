@@ -161,6 +161,35 @@ func (r *ModelRegistry) invalidateAvailableModelsCacheLocked() {
 	clear(r.availableModelsCache)
 }
 
+// SplitProviderQualifiedModelID splits a client-facing provider/model identifier.
+func SplitProviderQualifiedModelID(modelID string) (string, string, bool) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return "", "", false
+	}
+	provider, localID, ok := strings.Cut(modelID, "/")
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	localID = strings.TrimSpace(localID)
+	if !ok || provider == "" || localID == "" {
+		return "", "", false
+	}
+	return provider, localID, true
+}
+
+// QualifyModelID returns the public provider/model identifier for a local model.
+func QualifyModelID(provider, modelID string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	modelID = strings.TrimSpace(modelID)
+	if provider == "" || modelID == "" {
+		return modelID
+	}
+	prefix := provider + "/"
+	if strings.HasPrefix(strings.ToLower(modelID), prefix) {
+		return provider + "/" + strings.TrimSpace(modelID[len(prefix):])
+	}
+	return prefix + modelID
+}
+
 // LookupModelInfo searches dynamic registry (provider-specific > global) then static definitions.
 func LookupModelInfo(modelID string, provider ...string) *ModelInfo {
 	modelID = strings.TrimSpace(modelID)
@@ -172,11 +201,23 @@ func LookupModelInfo(modelID string, provider ...string) *ModelInfo {
 	if len(provider) > 0 {
 		p = strings.ToLower(strings.TrimSpace(provider[0]))
 	}
+	lookupID := modelID
+	if splitProvider, localID, ok := SplitProviderQualifiedModelID(modelID); ok {
+		if p == "" {
+			p = splitProvider
+		}
+		lookupID = localID
+	}
 
 	if info := GetGlobalRegistry().GetModelInfo(modelID, p); info != nil {
 		return cloneModelInfo(info)
 	}
-	return cloneModelInfo(LookupStaticModelInfo(modelID))
+	if p != "" {
+		if info := lookupStaticModelInfoByProvider(lookupID, p); info != nil {
+			return cloneModelInfo(info)
+		}
+	}
+	return cloneModelInfo(LookupStaticModelInfo(lookupID))
 }
 
 // SetHook sets an optional hook for observing model registration changes.
@@ -743,12 +784,26 @@ func (r *ModelRegistry) ClientSupportsModel(clientID, modelID string) bool {
 		return false
 	}
 
+	if clientSupportsModelID(models, modelID) {
+		return true
+	}
+
+	provider, localModelID, qualified := SplitProviderQualifiedModelID(modelID)
+	if !qualified {
+		return false
+	}
+	if clientProvider := r.clientProviders[clientID]; clientProvider != "" && clientProvider != provider {
+		return false
+	}
+	return clientSupportsModelID(models, localModelID)
+}
+
+func clientSupportsModelID(models []string, modelID string) bool {
 	for _, id := range models {
 		if strings.EqualFold(strings.TrimSpace(id), modelID) {
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -790,42 +845,17 @@ func (r *ModelRegistry) buildAvailableModelsLocked(handlerType string, now time.
 	models := make([]map[string]any, 0, len(r.models))
 	var expiresAt time.Time
 
-	for _, registration := range r.models {
-		availableClients := registration.Count
-
-		expiredClients := 0
-		for _, quotaTime := range registration.QuotaExceededClients {
-			if quotaTime == nil {
+	for modelID, registration := range r.models {
+		for _, provider := range providerNamesForRegistration(registration) {
+			available, providerExpiresAt := r.providerModelAvailableLocked(registration, provider, now)
+			if !providerExpiresAt.IsZero() && (expiresAt.IsZero() || providerExpiresAt.Before(expiresAt)) {
+				expiresAt = providerExpiresAt
+			}
+			if !available {
 				continue
 			}
-			recoveryAt := quotaTime.Add(modelQuotaExceededWindow)
-			if now.Before(recoveryAt) {
-				expiredClients++
-				if expiresAt.IsZero() || recoveryAt.Before(expiresAt) {
-					expiresAt = recoveryAt
-				}
-			}
-		}
-
-		cooldownSuspended := 0
-		otherSuspended := 0
-		if registration.SuspendedClients != nil {
-			for _, reason := range registration.SuspendedClients {
-				if strings.EqualFold(reason, "quota") {
-					cooldownSuspended++
-					continue
-				}
-				otherSuspended++
-			}
-		}
-
-		effectiveClients := availableClients - expiredClients - otherSuspended
-		if effectiveClients < 0 {
-			effectiveClients = 0
-		}
-
-		if effectiveClients > 0 || (availableClients > 0 && (expiredClients > 0 || cooldownSuspended > 0) && otherSuspended == 0) {
-			model := r.convertModelToMap(registration.Info, handlerType)
+			info := publicModelInfoForProvider(registration, provider, modelID)
+			model := r.convertModelToMap(info, handlerType)
 			if model != nil {
 				models = append(models, model)
 			}
@@ -833,6 +863,104 @@ func (r *ModelRegistry) buildAvailableModelsLocked(handlerType string, now time.
 	}
 
 	return models, expiresAt
+}
+
+func providerNamesForRegistration(registration *ModelRegistration) []string {
+	if registration == nil || len(registration.Providers) == 0 {
+		return nil
+	}
+	type providerCount struct {
+		name  string
+		count int
+	}
+	providers := make([]providerCount, 0, len(registration.Providers))
+	for name, count := range registration.Providers {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" || count <= 0 {
+			continue
+		}
+		providers = append(providers, providerCount{name: name, count: count})
+	}
+	sort.Slice(providers, func(i, j int) bool {
+		if providers[i].count == providers[j].count {
+			return providers[i].name < providers[j].name
+		}
+		return providers[i].count > providers[j].count
+	})
+	out := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		out = append(out, provider.name)
+	}
+	return out
+}
+
+func publicModelInfoForProvider(registration *ModelRegistration, provider, fallbackModelID string) *ModelInfo {
+	if registration == nil {
+		return nil
+	}
+	var info *ModelInfo
+	if provider != "" && registration.InfoByProvider != nil {
+		info = registration.InfoByProvider[provider]
+	}
+	if info == nil {
+		info = registration.Info
+	}
+	out := cloneModelInfo(info)
+	if out == nil {
+		out = &ModelInfo{ID: strings.TrimSpace(fallbackModelID)}
+	}
+	if strings.TrimSpace(out.ID) == "" {
+		out.ID = strings.TrimSpace(fallbackModelID)
+	}
+	out.ID = QualifyModelID(provider, out.ID)
+	return out
+}
+
+func (r *ModelRegistry) providerModelAvailableLocked(registration *ModelRegistration, provider string, now time.Time) (bool, time.Time) {
+	if registration == nil || provider == "" {
+		return false, time.Time{}
+	}
+	availableClients := registration.Providers[provider]
+	if availableClients <= 0 {
+		return false, time.Time{}
+	}
+
+	expiredClients := 0
+	var expiresAt time.Time
+	for clientID, quotaTime := range registration.QuotaExceededClients {
+		if quotaTime == nil || r.clientProviders[clientID] != provider {
+			continue
+		}
+		recoveryAt := quotaTime.Add(modelQuotaExceededWindow)
+		if now.Before(recoveryAt) {
+			expiredClients++
+			if expiresAt.IsZero() || recoveryAt.Before(expiresAt) {
+				expiresAt = recoveryAt
+			}
+		}
+	}
+
+	cooldownSuspended := 0
+	otherSuspended := 0
+	if registration.SuspendedClients != nil {
+		for clientID, reason := range registration.SuspendedClients {
+			if r.clientProviders[clientID] != provider {
+				continue
+			}
+			if strings.EqualFold(reason, "quota") {
+				cooldownSuspended++
+				continue
+			}
+			otherSuspended++
+		}
+	}
+
+	effectiveClients := availableClients - expiredClients - otherSuspended
+	if effectiveClients < 0 {
+		effectiveClients = 0
+	}
+
+	return effectiveClients > 0 || (availableClients > 0 && (expiredClients > 0 || cooldownSuspended > 0) && otherSuspended == 0), expiresAt
 }
 
 func cloneModelMaps(models []map[string]any) []map[string]any {
@@ -1003,6 +1131,7 @@ func (r *ModelRegistry) GetAvailableModelsByProvider(provider string) []*ModelIn
 // Returns:
 //   - int: Number of available clients for the model
 func (r *ModelRegistry) GetModelCount(modelID string) int {
+	modelID = strings.TrimSpace(modelID)
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
@@ -1026,6 +1155,15 @@ func (r *ModelRegistry) GetModelCount(modelID string) int {
 		}
 		return result
 	}
+	if provider, localModelID, ok := SplitProviderQualifiedModelID(modelID); ok {
+		if registration, exists := r.models[localModelID]; exists {
+			available, _ := r.providerModelAvailableLocked(registration, provider, time.Now())
+			if !available {
+				return 0
+			}
+			return registration.Providers[provider]
+		}
+	}
 	return 0
 }
 
@@ -1036,10 +1174,20 @@ func (r *ModelRegistry) GetModelCount(modelID string) int {
 // Returns:
 //   - []string: Provider identifiers ordered by availability count (descending)
 func (r *ModelRegistry) GetModelProviders(modelID string) []string {
+	modelID = strings.TrimSpace(modelID)
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
 	registration, exists := r.models[modelID]
+	if !exists {
+		if provider, localModelID, ok := SplitProviderQualifiedModelID(modelID); ok {
+			registration, exists = r.models[localModelID]
+			if !exists || registration == nil || registration.Providers[provider] <= 0 {
+				return nil
+			}
+			return []string{provider}
+		}
+	}
 	if !exists || registration == nil || len(registration.Providers) == 0 {
 		return nil
 	}
@@ -1088,8 +1236,18 @@ func (r *ModelRegistry) GetModelProviders(modelID string) []string {
 
 // GetModelInfo returns ModelInfo, prioritizing provider-specific definition if available.
 func (r *ModelRegistry) GetModelInfo(modelID, provider string) *ModelInfo {
+	modelID = strings.TrimSpace(modelID)
+	provider = strings.ToLower(strings.TrimSpace(provider))
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
+	if _, ok := r.models[modelID]; !ok {
+		if splitProvider, localModelID, qualified := SplitProviderQualifiedModelID(modelID); qualified {
+			if provider == "" {
+				provider = splitProvider
+			}
+			modelID = localModelID
+		}
+	}
 	if reg, ok := r.models[modelID]; ok && reg != nil {
 		// Try provider specific definition first
 		if provider != "" && reg.InfoByProvider != nil {

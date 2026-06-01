@@ -50,19 +50,25 @@ func buildCodexClientModels(models []map[string]any) []map[string]any {
 		if id == "" {
 			continue
 		}
+		provider, localID, qualified := registry.SplitProviderQualifiedModelID(id)
+		templateID := id
+		if qualified {
+			templateID = localID
+		}
 
-		if template, ok := templates[id]; ok {
+		if template, ok := templates[templateID]; ok {
 			entry := cloneCodexClientModelMap(template)
+			entry["slug"] = id
 			sanitizeCodexClientReasoningMetadata(entry)
-			applyCodexClientVisibilityOverride(entry, id)
+			applyCodexClientVisibilityOverride(entry, templateID)
 			result = append(result, entry)
 			continue
 		}
 
 		entry := cloneCodexClientModelMap(defaultTemplate)
-		applyCodexClientModelMetadata(entry, id, model)
+		applyCodexClientModelMetadata(entry, id, templateID, provider, model)
 		sanitizeCodexClientReasoningMetadata(entry)
-		applyCodexClientVisibilityOverride(entry, id)
+		applyCodexClientVisibilityOverride(entry, templateID)
 		result = append(result, entry)
 	}
 
@@ -97,8 +103,8 @@ func loadCodexClientModelTemplates() (map[string]map[string]any, map[string]any,
 	return codexClientModelTemplates, codexClientDefaultTemplate, codexClientModelTemplatesErr
 }
 
-func applyCodexClientModelMetadata(entry map[string]any, id string, model map[string]any) {
-	info := registry.LookupModelInfo(id)
+func applyCodexClientModelMetadata(entry map[string]any, id, lookupID, provider string, model map[string]any) {
+	info := registry.LookupModelInfo(lookupID, provider)
 
 	displayName := stringModelValue(model, "display_name")
 	description := stringModelValue(model, "description")

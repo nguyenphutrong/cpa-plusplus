@@ -113,6 +113,14 @@ func (h *Handler) GetVirtualModelAvailableTargets(c *gin.Context) {
 		if modelID == "" {
 			continue
 		}
+		if provider, localModelID, ok := registry.SplitProviderQualifiedModelID(modelID); ok {
+			targets = append(targets, target{
+				Provider: provider,
+				Model:    localModelID,
+				Target:   registry.QualifyModelID(provider, localModelID),
+			})
+			continue
+		}
 		for _, provider := range reg.GetModelProviders(modelID) {
 			provider = strings.TrimSpace(strings.ToLower(provider))
 			if provider == "" {

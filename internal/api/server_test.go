@@ -531,14 +531,14 @@ func TestModelsWithClientVersionReturnsCodexCatalog(t *testing.T) {
 	var custom map[string]any
 	for _, model := range resp.Models {
 		switch slug, _ := model["slug"].(string); slug {
-		case "gpt-5.5":
+		case "openai/gpt-5.5":
 			gpt55 = model
-		case "custom-codex-model-test":
+		case "openai/custom-codex-model-test":
 			custom = model
 		}
 	}
 	if gpt55 == nil {
-		t.Fatal("expected gpt-5.5 codex catalog entry")
+		t.Fatal("expected openai/gpt-5.5 codex catalog entry")
 	}
 	if _, ok := gpt55["minimal_client_version"]; !ok {
 		t.Fatal("expected minimal_client_version in codex catalog")
@@ -580,10 +580,10 @@ func TestModelsWithClientVersionReturnsCodexCatalog(t *testing.T) {
 	}
 
 	hiddenModels := map[string]bool{
-		"grok-imagine-image-quality": false,
-		"gpt-image-2":                false,
-		"grok-imagine-image":         false,
-		"grok-imagine-video":         false,
+		"openai/grok-imagine-image-quality": false,
+		"openai/gpt-image-2":                false,
+		"openai/grok-imagine-image":         false,
+		"openai/grok-imagine-video":         false,
 	}
 	for _, model := range resp.Models {
 		slug, _ := model["slug"].(string)
@@ -599,6 +599,53 @@ func TestModelsWithClientVersionReturnsCodexCatalog(t *testing.T) {
 		if !found {
 			t.Fatalf("expected hidden model %s in codex catalog", slug)
 		}
+	}
+}
+
+func TestOpenAIModelsReturnsProviderPrefixedConcreteModelsAndBareVirtualModels(t *testing.T) {
+	modelRegistry := registry.GetGlobalRegistry()
+	modelRegistry.RegisterClient("test-models-codex", "codex", []*registry.ModelInfo{{ID: "gpt-5.5", Object: "model", OwnedBy: "openai"}})
+	modelRegistry.RegisterClient("test-models-copilot", "github-copilot", []*registry.ModelInfo{{ID: "gpt-5.5", Object: "model", OwnedBy: "github"}})
+	t.Cleanup(func() {
+		modelRegistry.UnregisterClient("test-models-codex")
+		modelRegistry.UnregisterClient("test-models-copilot")
+	})
+
+	server := newTestServer(t)
+	server.handlers.AuthManager.SetConfig(&proxyconfig.Config{
+		VirtualModels: map[string]proxyconfig.VirtualModelConfig{
+			"fast": {Targets: []proxyconfig.VirtualModelTarget{{Target: "codex/gpt-5.5"}}},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var resp struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response JSON: %v; body=%s", err, rr.Body.String())
+	}
+	seen := map[string]bool{}
+	for _, model := range resp.Data {
+		id, _ := model["id"].(string)
+		seen[id] = true
+	}
+	for _, id := range []string{"codex/gpt-5.5", "github-copilot/gpt-5.5", "fast"} {
+		if !seen[id] {
+			t.Fatalf("missing model %q in %#v", id, seen)
+		}
+	}
+	if seen["gpt-5.5"] {
+		t.Fatalf("bare concrete model leaked in %#v", seen)
 	}
 }
 
@@ -669,7 +716,7 @@ func TestCodexModelsMergesUpstreamAndLocalModels(t *testing.T) {
 		if got, _ := seen["openai/gpt-4.1"]["display_name"].(string); got != "Upstream duplicate" {
 			t.Fatalf("%s duplicate model did not prefer upstream, display_name=%q", path, got)
 		}
-		if _, ok := seen["local-codex-surface-model"]; !ok {
+		if _, ok := seen["openai/local-codex-surface-model"]; !ok {
 			t.Fatalf("%s missing local registry model in %#v", path, seen)
 		}
 	}

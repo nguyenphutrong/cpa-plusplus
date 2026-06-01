@@ -1090,8 +1090,8 @@ func TestWebsocketUpstreamSupportsIncrementalInputForModel(t *testing.T) {
 
 	base := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)
 	h := NewOpenAIResponsesAPIHandler(base)
-	if !h.websocketUpstreamSupportsIncrementalInputForModel("test-model") {
-		t.Fatalf("expected websocket-capable upstream for test-model")
+	if !h.websocketUpstreamSupportsIncrementalInputForModel("test-provider/test-model") {
+		t.Fatalf("expected websocket-capable upstream for test-provider/test-model")
 	}
 }
 
@@ -1112,12 +1112,12 @@ func TestWebsocketUpstreamSupportsCompactionReplayForModel(t *testing.T) {
 
 	base := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)
 	h := NewOpenAIResponsesAPIHandler(base)
-	if !h.websocketUpstreamSupportsCompactionReplayForModel("test-model") {
+	if !h.websocketUpstreamSupportsCompactionReplayForModel("codex/test-model") {
 		t.Fatalf("expected codex upstream to support compaction replay")
 	}
 }
 
-func TestWebsocketUpstreamSupportsCompactionReplayForModelFalseWhenMixedBackends(t *testing.T) {
+func TestWebsocketUpstreamSupportsCompactionReplayForPrefixedModelIgnoresOtherProviders(t *testing.T) {
 	manager := coreauth.NewManager(nil, nil, nil)
 	auths := []*coreauth.Auth{
 		{ID: "auth-codex", Provider: "codex", Status: coreauth.StatusActive},
@@ -1137,8 +1137,28 @@ func TestWebsocketUpstreamSupportsCompactionReplayForModelFalseWhenMixedBackends
 
 	base := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)
 	h := NewOpenAIResponsesAPIHandler(base)
-	if h.websocketUpstreamSupportsCompactionReplayForModel("test-model") {
-		t.Fatalf("expected mixed backend model to disable compaction replay bypass")
+	if !h.websocketUpstreamSupportsCompactionReplayForModel("codex/test-model") {
+		t.Fatalf("expected prefixed codex model to support compaction replay")
+	}
+}
+
+func TestResponsesWebsocketProviderSetForPrefixedModel(t *testing.T) {
+	registry.GetGlobalRegistry().RegisterClient("responses-ws-codex-prefixed", "codex", []*registry.ModelInfo{{ID: "test-model"}})
+	registry.GetGlobalRegistry().RegisterClient("responses-ws-copilot-prefixed", "github-copilot", []*registry.ModelInfo{{ID: "test-model"}})
+	t.Cleanup(func() {
+		registry.GetGlobalRegistry().UnregisterClient("responses-ws-codex-prefixed")
+		registry.GetGlobalRegistry().UnregisterClient("responses-ws-copilot-prefixed")
+	})
+
+	providers, modelKey := responsesWebsocketProviderSetForModel("codex/test-model(high)")
+	if modelKey != "test-model" {
+		t.Fatalf("modelKey = %q, want test-model", modelKey)
+	}
+	if len(providers) != 1 {
+		t.Fatalf("providers = %#v, want only codex", providers)
+	}
+	if _, ok := providers["codex"]; !ok {
+		t.Fatalf("providers = %#v, want codex", providers)
 	}
 }
 
@@ -1177,7 +1197,7 @@ func TestResponsesWebsocketPrewarmHandledLocallyForSSEUpstream(t *testing.T) {
 		}
 	}()
 
-	errWrite := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.create","model":"test-model","generate":false}`))
+	errWrite := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.create","model":"test-provider/test-model","generate":false}`))
 	if errWrite != nil {
 		t.Fatalf("write prewarm websocket message: %v", errWrite)
 	}
@@ -1320,7 +1340,7 @@ func TestResponsesWebsocketPinsOnlyWebsocketCapableAuth(t *testing.T) {
 	}()
 
 	requests := []string{
-		`{"type":"response.create","model":"test-model","input":[{"type":"message","id":"msg-1"}]}`,
+		`{"type":"response.create","model":"test-provider/test-model","input":[{"type":"message","id":"msg-1"}]}`,
 		`{"type":"response.create","input":[{"type":"message","id":"msg-2"}]}`,
 	}
 	for i := range requests {
@@ -1395,7 +1415,7 @@ func TestResponsesWebsocketReleasesPinnedAuthAfterQuotaError(t *testing.T) {
 	}()
 
 	requests := []string{
-		`{"type":"response.create","model":"quota-model","input":[{"type":"message","id":"msg-1"}]}`,
+		`{"type":"response.create","model":"test-provider/quota-model","input":[{"type":"message","id":"msg-1"}]}`,
 		`{"type":"response.create","previous_response_id":"resp-auth-a-1","input":[{"type":"message","id":"msg-2"}]}`,
 		`{"type":"response.create","previous_response_id":"resp-auth-a-1","input":[{"type":"message","id":"msg-3"}]}`,
 	}
@@ -1596,7 +1616,7 @@ func TestResponsesWebsocketCompactionResetsTurnStateOnCustomToolTranscriptReplac
 	}()
 
 	requests := []string{
-		`{"type":"response.create","model":"test-model","input":[{"type":"message","id":"msg-1"}]}`,
+		`{"type":"response.create","model":"test-provider/test-model","input":[{"type":"message","id":"msg-1"}]}`,
 		`{"type":"response.create","input":[{"type":"custom_tool_call_output","call_id":"call-1","id":"tool-out-1"}]}`,
 	}
 	for i := range requests {
@@ -1615,7 +1635,7 @@ func TestResponsesWebsocketCompactionResetsTurnStateOnCustomToolTranscriptReplac
 	compactResp, errPost := server.Client().Post(
 		server.URL+"/v1/responses/compact",
 		"application/json",
-		strings.NewReader(`{"model":"test-model","input":[{"type":"message","id":"summary-1"}]}`),
+		strings.NewReader(`{"model":"test-provider/test-model","input":[{"type":"message","id":"summary-1"}]}`),
 	)
 	if errPost != nil {
 		t.Fatalf("compact request failed: %v", errPost)
@@ -1700,7 +1720,7 @@ func TestResponsesWebsocketCompactionResetsTurnStateOnTranscriptReplacement(t *t
 	}()
 
 	requests := []string{
-		`{"type":"response.create","model":"test-model","input":[{"type":"message","id":"msg-1"}]}`,
+		`{"type":"response.create","model":"test-provider/test-model","input":[{"type":"message","id":"msg-1"}]}`,
 		`{"type":"response.create","input":[{"type":"function_call_output","call_id":"call-1","id":"tool-out-1"}]}`,
 	}
 	for i := range requests {
@@ -1719,7 +1739,7 @@ func TestResponsesWebsocketCompactionResetsTurnStateOnTranscriptReplacement(t *t
 	compactResp, errPost := server.Client().Post(
 		server.URL+"/v1/responses/compact",
 		"application/json",
-		strings.NewReader(`{"model":"test-model","input":[{"type":"message","id":"summary-1"}]}`),
+		strings.NewReader(`{"model":"test-provider/test-model","input":[{"type":"message","id":"summary-1"}]}`),
 	)
 	if errPost != nil {
 		t.Fatalf("compact request failed: %v", errPost)

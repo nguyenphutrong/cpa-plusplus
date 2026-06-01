@@ -51,24 +51,31 @@ func TestGetRequestDetails_PreservesSuffix(t *testing.T) {
 	}{
 		{
 			name:          "numeric suffix preserved",
-			inputModel:    "gemini-2.5-pro(8192)",
+			inputModel:    "gemini/gemini-2.5-pro(8192)",
 			wantProviders: []string{"gemini"},
 			wantModel:     "gemini-2.5-pro(8192)",
 			wantErr:       false,
 		},
 		{
 			name:          "level suffix preserved",
-			inputModel:    "gpt-5.2(high)",
+			inputModel:    "openai/gpt-5.2(high)",
 			wantProviders: []string{"openai"},
 			wantModel:     "gpt-5.2(high)",
 			wantErr:       false,
 		},
 		{
 			name:          "no suffix unchanged",
-			inputModel:    "claude-sonnet-4-5",
+			inputModel:    "claude/claude-sonnet-4-5",
 			wantProviders: []string{"claude"},
 			wantModel:     "claude-sonnet-4-5",
 			wantErr:       false,
+		},
+		{
+			name:          "bare concrete model rejected",
+			inputModel:    "gpt-5.2(high)",
+			wantProviders: nil,
+			wantModel:     "",
+			wantErr:       true,
 		},
 		{
 			name:          "unknown model with suffix",
@@ -86,14 +93,14 @@ func TestGetRequestDetails_PreservesSuffix(t *testing.T) {
 		},
 		{
 			name:          "special suffix none preserved",
-			inputModel:    "gemini-2.5-flash(none)",
+			inputModel:    "gemini/gemini-2.5-flash(none)",
 			wantProviders: []string{"gemini"},
 			wantModel:     "gemini-2.5-flash(none)",
 			wantErr:       false,
 		},
 		{
 			name:          "special suffix auto preserved",
-			inputModel:    "claude-sonnet-4-5(auto)",
+			inputModel:    "claude/claude-sonnet-4-5(auto)",
 			wantProviders: []string{"claude"},
 			wantModel:     "claude-sonnet-4-5(auto)",
 			wantErr:       false,
@@ -120,11 +127,16 @@ func TestGetRequestDetails_PreservesSuffix(t *testing.T) {
 }
 
 func TestGetRequestDetails_ImageModelReturns503(t *testing.T) {
+	modelRegistry := registry.GetGlobalRegistry()
+	modelRegistry.RegisterClient("test-request-details-image", "openai", []*registry.ModelInfo{{ID: "gpt-image-2"}})
+	t.Cleanup(func() {
+		modelRegistry.UnregisterClient("test-request-details-image")
+	})
 	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, coreauth.NewManager(nil, nil, nil))
 
-	_, _, errMsg := handler.getRequestDetails("gpt-image-2")
+	_, _, errMsg := handler.getRequestDetails("openai/gpt-image-2")
 	if errMsg == nil {
-		t.Fatalf("expected error for gpt-image-2, got nil")
+		t.Fatalf("expected error for openai/gpt-image-2, got nil")
 	}
 	if errMsg.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("unexpected status code: got %d want %d", errMsg.StatusCode, http.StatusServiceUnavailable)

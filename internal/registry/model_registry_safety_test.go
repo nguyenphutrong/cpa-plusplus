@@ -105,8 +105,8 @@ func TestCleanupExpiredQuotasInvalidatesAvailableModelsCache(t *testing.T) {
 	if len(models) != 1 {
 		t.Fatalf("expected model to stay available after cleanup, got %d", len(models))
 	}
-	if got := models[0]["id"]; got != "m1" {
-		t.Fatalf("expected model id m1, got %v", got)
+	if got := models[0]["id"]; got != "openai/m1" {
+		t.Fatalf("expected model id openai/m1, got %v", got)
 	}
 }
 

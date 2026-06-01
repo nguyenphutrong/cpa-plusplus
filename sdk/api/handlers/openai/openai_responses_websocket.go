@@ -622,9 +622,21 @@ func responsesWebsocketResolvedModelName(modelName string) string {
 func responsesWebsocketProviderSetForModel(resolvedModelName string) (map[string]struct{}, string) {
 	parsed := thinking.ParseSuffix(resolvedModelName)
 	baseModel := strings.TrimSpace(parsed.ModelName)
-	providers := util.GetProviderName(baseModel)
-	if len(providers) == 0 && baseModel != resolvedModelName {
-		providers = util.GetProviderName(resolvedModelName)
+	providers := []string{}
+	modelKey := baseModel
+	if provider, localModel, ok := registry.SplitProviderQualifiedModelID(baseModel); ok {
+		modelKey = localModel
+		for _, candidate := range util.GetProviderName(localModel) {
+			if strings.EqualFold(strings.TrimSpace(candidate), provider) {
+				providers = []string{provider}
+				break
+			}
+		}
+	} else {
+		providers = util.GetProviderName(baseModel)
+		if len(providers) == 0 && baseModel != resolvedModelName {
+			providers = util.GetProviderName(resolvedModelName)
+		}
 	}
 	providerSet := make(map[string]struct{}, len(providers))
 	for _, provider := range providers {
@@ -634,7 +646,6 @@ func responsesWebsocketProviderSetForModel(resolvedModelName string) (map[string
 		}
 		providerSet[providerKey] = struct{}{}
 	}
-	modelKey := baseModel
 	if modelKey == "" {
 		modelKey = strings.TrimSpace(resolvedModelName)
 	}

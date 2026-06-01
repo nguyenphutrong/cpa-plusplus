@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/routing"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
@@ -23,6 +24,8 @@ import (
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"golang.org/x/net/context"
 )
 
@@ -573,7 +576,7 @@ func (h *BaseAPIHandler) executeWithAuthManager(ctx context.Context, handlerType
 		reqMeta[coreexecutor.VirtualTargetsMetadataKey] = details.virtualTargets
 	}
 	setReasoningEffortMetadata(reqMeta, handlerType, details.normalizedModel, rawJSON)
-	payload := rawJSON
+	payload := payloadWithExecutionModel(rawJSON, details.normalizedModel)
 	if len(payload) == 0 {
 		payload = nil
 	}
@@ -625,7 +628,7 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 		reqMeta[coreexecutor.VirtualTargetsMetadataKey] = details.virtualTargets
 	}
 	setReasoningEffortMetadata(reqMeta, handlerType, details.normalizedModel, rawJSON)
-	payload := rawJSON
+	payload := payloadWithExecutionModel(rawJSON, details.normalizedModel)
 	if len(payload) == 0 {
 		payload = nil
 	}
@@ -690,7 +693,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManager(ctx context.Context, handl
 		reqMeta[coreexecutor.VirtualTargetsMetadataKey] = details.virtualTargets
 	}
 	setReasoningEffortMetadata(reqMeta, handlerType, details.normalizedModel, rawJSON)
-	payload := rawJSON
+	payload := payloadWithExecutionModel(rawJSON, details.normalizedModel)
 	if len(payload) == 0 {
 		payload = nil
 	}
@@ -928,14 +931,6 @@ func (h *BaseAPIHandler) getRequestDetailsForExecution(modelName string, allowIm
 	}
 
 	parsed := thinking.ParseSuffix(resolvedModelName)
-	baseModel := strings.TrimSpace(parsed.ModelName)
-
-	if strings.EqualFold(routeModelBaseName(baseModel), "gpt-image-2") && !allowImageModel {
-		return requestDetails{err: &interfaces.ErrorMessage{
-			StatusCode: http.StatusServiceUnavailable,
-			Error:      fmt.Errorf("model %s is only supported on /v1/images/generations and /v1/images/edits", routeModelBaseName(baseModel)),
-		}}
-	}
 
 	if h != nil && h.AuthManager != nil && h.AuthManager.HomeEnabled() {
 		return requestDetails{providers: []string{"home"}, normalizedModel: resolvedModelName}
@@ -959,23 +954,48 @@ func (h *BaseAPIHandler) getRequestDetailsForExecution(modelName string, allowIm
 		}
 	}
 
-	providers := util.GetProviderName(baseModel)
-	// Fallback: if baseModel has no provider but differs from resolvedModelName,
-	// try using the full model name. This handles edge cases where custom models
-	// may be registered with their full suffixed name (e.g., "my-model(8192)").
-	// Evaluated in Story 11.8: This fallback is intentionally preserved to support
-	// custom model registrations that include thinking suffixes.
-	if len(providers) == 0 && baseModel != resolvedModelName {
-		providers = util.GetProviderName(resolvedModelName)
+	provider, localModel, ok := routeProviderQualifiedModel(parsed)
+	if !ok {
+		return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("model %s must use provider/model", modelName)}}
 	}
-
-	if len(providers) == 0 {
+	if !providerServesModel(provider, localModel) {
 		return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("unknown provider for model %s", modelName)}}
+	}
+	if strings.EqualFold(routeModelBaseName(localModel), "gpt-image-2") && !allowImageModel {
+		return requestDetails{err: &interfaces.ErrorMessage{
+			StatusCode: http.StatusServiceUnavailable,
+			Error:      fmt.Errorf("model %s is only supported on /v1/images/generations and /v1/images/edits", routeModelBaseName(localModel)),
+		}}
 	}
 
 	// The thinking suffix is preserved in the model name itself, so no
 	// metadata-based configuration passing is needed.
-	return requestDetails{providers: providers, normalizedModel: resolvedModelName}
+	return requestDetails{providers: []string{provider}, normalizedModel: localModel}
+}
+
+func routeProviderQualifiedModel(parsed thinking.SuffixResult) (string, string, bool) {
+	provider, localModel, ok := registry.SplitProviderQualifiedModelID(parsed.ModelName)
+	if !ok {
+		return "", "", false
+	}
+	if parsed.HasSuffix {
+		localModel = fmt.Sprintf("%s(%s)", localModel, parsed.RawSuffix)
+	}
+	return provider, localModel, true
+}
+
+func providerServesModel(provider, model string) bool {
+	provider = strings.TrimSpace(strings.ToLower(provider))
+	baseModel := strings.TrimSpace(thinking.ParseSuffix(model).ModelName)
+	if provider == "" || baseModel == "" {
+		return false
+	}
+	for _, candidate := range util.GetProviderName(baseModel) {
+		if strings.EqualFold(strings.TrimSpace(candidate), provider) {
+			return true
+		}
+	}
+	return false
 }
 
 func providersFromVirtualTargets(targets []routing.VirtualTarget) []string {
@@ -1004,6 +1024,18 @@ func routeModelBaseName(model string) string {
 		return strings.TrimSpace(model[idx+1:])
 	}
 	return model
+}
+
+func payloadWithExecutionModel(payload []byte, model string) []byte {
+	model = strings.TrimSpace(model)
+	if len(payload) == 0 || model == "" || !gjson.GetBytes(payload, "model").Exists() {
+		return payload
+	}
+	updated, errSet := sjson.SetBytes(payload, "model", model)
+	if errSet != nil {
+		return payload
+	}
+	return updated
 }
 
 func cloneBytes(src []byte) []byte {

@@ -102,7 +102,7 @@ func TestOpenAIResponsesCompactExecute(t *testing.T) {
 	router := gin.New()
 	router.POST("/v1/responses/compact", h.Compact)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"test-model","input":"hello"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"test-provider/test-model","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
@@ -146,7 +146,7 @@ func TestOpenAIResponsesCompactDecodesZstdRequestBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("zstd.NewWriter: %v", err)
 	}
-	if _, errWrite := encoder.Write([]byte(`{"model":"test-model","input":"hello"}`)); errWrite != nil {
+	if _, errWrite := encoder.Write([]byte(`{"model":"test-provider/test-model","input":"hello"}`)); errWrite != nil {
 		t.Fatalf("zstd write: %v", errWrite)
 	}
 	if errClose := encoder.Close(); errClose != nil {
