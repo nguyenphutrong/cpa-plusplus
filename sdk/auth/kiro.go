@@ -164,7 +164,7 @@ func BuildKiroAuthRecord(bundle *kiro.TokenBundle, source string) *coreauth.Auth
 	if expiresAt.IsZero() {
 		expiresAt = now.Add(time.Hour)
 	}
-	email := firstKiroNonEmpty(bundle.Email, bundle.Username)
+	email := firstKiroNonEmpty(bundle.Email)
 	return &coreauth.Auth{
 		ID:        fileName,
 		Provider:  "kiro",
@@ -201,9 +201,9 @@ func kiroAuthRecordIDPart(bundle *kiro.TokenBundle) string {
 	if bundle == nil {
 		return "account-" + randomKiroIdentifierSuffix()
 	}
-	identity := firstKiroNonEmpty(bundle.Email, bundle.Username, bundle.Subject, bundle.ProfileARN, bundle.ClientID)
-	if identity != "" {
-		return sanitizeKiroIdentifier(identity)
+	email := firstKiroNonEmpty(bundle.Email)
+	if email != "" {
+		return sanitizeKiroIdentifier(email)
 	}
 	if fingerprint := kiroTokenFingerprint(bundle.RefreshToken, bundle.AccessToken); fingerprint != "" {
 		return "account-" + fingerprint

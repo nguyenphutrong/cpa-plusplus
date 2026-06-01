@@ -47,6 +47,18 @@ func TestBuildKiroAuthRecordAvoidsGenericAccountIDCollisions(t *testing.T) {
 	if withEmail.ID != "kiro-signin_localhost-dev-example.com.json" {
 		t.Fatalf("email-based Kiro auth ID = %q", withEmail.ID)
 	}
+
+	withProfileARN := BuildKiroAuthRecord(&kiroauth.TokenBundle{
+		AccessToken:  "access-arn",
+		RefreshToken: "refresh-arn",
+		ProfileARN:   "arn:aws:codewhisperer:us-east-1:123:profile/demo",
+	}, "signin_localhost")
+	if strings.Contains(withProfileARN.ID, "arn-aws-codewhisperer") {
+		t.Fatalf("profile ARN leaked into Kiro auth ID: %q", withProfileARN.ID)
+	}
+	if !strings.HasPrefix(withProfileARN.ID, "kiro-signin_localhost-account-") {
+		t.Fatalf("profile ARN fallback Kiro auth ID = %q", withProfileARN.ID)
+	}
 }
 
 func TestRefreshKiroTokenPersistsProfileMetadata(t *testing.T) {

@@ -1,10 +1,16 @@
 package management
 
 import (
+	"context"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota"
+	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	log "github.com/sirupsen/logrus"
 )
 
 // Quota exceeded toggles
@@ -85,8 +91,9 @@ func (h *Handler) PostQuotaRefresh(c *gin.Context) {
 	provider := c.Param("provider")
 	authID := c.Param("authID")
 	if provider == "" && authID == "" {
-		view, _ := service.SyncAll(c.Request.Context())
-		c.JSON(http.StatusOK, view)
+		_, _ = service.SyncAll(c.Request.Context())
+		h.renameKiroAuthRecordsWithEmail(c.Request.Context(), service.Auths())
+		c.JSON(http.StatusOK, quota.BuildQuotaView(service.Auths(), service.SupportsProvider))
 		return
 	}
 	if provider == "" || authID == "" {
@@ -106,10 +113,63 @@ func (h *Handler) PostQuotaRefresh(c *gin.Context) {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
 		}
+		h.renameKiroAuthRecordsWithEmail(c.Request.Context(), []*coreauth.Auth{auth})
 		c.JSON(http.StatusOK, quota.BuildQuotaView(service.Auths(), service.SupportsProvider))
 		return
 	}
 	c.JSON(http.StatusNotFound, gin.H{"error": "credential not found"})
+}
+
+func (h *Handler) renameKiroAuthRecordsWithEmail(ctx context.Context, auths []*coreauth.Auth) {
+	for _, auth := range auths {
+		h.renameKiroAuthRecordWithEmail(ctx, auth)
+	}
+}
+
+func (h *Handler) renameKiroAuthRecordWithEmail(ctx context.Context, auth *coreauth.Auth) {
+	if h == nil || h.authManager == nil || auth == nil || quota.ProviderKey(auth) != "kiro" {
+		return
+	}
+	email := firstProviderNonEmpty(authEmail(auth), quota.ProviderDataAccountLabel("kiro", quota.CachedQuotaData(auth)))
+	if !strings.Contains(email, "@") {
+		return
+	}
+	source := firstProviderNonEmpty(metaStringValue(auth.Metadata, "auth_method"), authAttribute(auth, "source"), "signin_localhost")
+	desiredID := sdkAuth.BuildKiroAuthRecord(&kiro.TokenBundle{Email: email}, source).ID
+	if desiredID == "" || desiredID == auth.ID {
+		return
+	}
+	if existing, ok := h.authManager.GetByID(desiredID); ok && existing != nil {
+		log.Warnf("skip Kiro auth rename from %s to %s: destination already exists", auth.ID, desiredID)
+		return
+	}
+
+	renamed := auth.Clone()
+	oldID := renamed.ID
+	renamed.ID = desiredID
+	renamed.FileName = desiredID
+	if renamed.Metadata == nil {
+		renamed.Metadata = map[string]any{}
+	}
+	if renamed.Attributes == nil {
+		renamed.Attributes = map[string]string{}
+	}
+	renamed.Metadata["email"] = email
+	renamed.Attributes["email"] = email
+	delete(renamed.Attributes, "path")
+
+	if _, err := h.saveTokenRecord(ctx, renamed); err != nil {
+		log.Warnf("failed to save renamed Kiro auth %s: %v", desiredID, err)
+		return
+	}
+	if err := h.deleteTokenRecord(ctx, oldID); err != nil {
+		log.Warnf("failed to delete old Kiro auth %s after rename to %s: %v", oldID, desiredID, err)
+		return
+	}
+	h.authManager.UnregisterAuth(oldID)
+	if _, err := h.authManager.Register(coreauth.WithSkipPersist(ctx), renamed); err != nil {
+		log.Warnf("failed to register renamed Kiro auth %s: %v", desiredID, err)
+	}
 }
 
 func (h *Handler) quotaService() *quota.SyncService {

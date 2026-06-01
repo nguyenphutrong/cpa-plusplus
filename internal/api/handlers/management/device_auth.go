@@ -17,8 +17,12 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/misc"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota"
+	quotaProviders "github.com/router-for-me/CLIProxyAPI/v7/internal/quota/providers"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota/storage"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -47,6 +51,7 @@ var (
 		}
 		return kiro.NewService(util.SetProxy(&cfg.SDKConfig, &http.Client{Timeout: 30 * time.Second}))
 	}
+	fetchKiroQuotaIdentity = fetchKiroQuotaIdentityDefault
 )
 
 func (h *Handler) RequestGitHubCopilotToken(c *gin.Context) {
@@ -594,6 +599,67 @@ func resolveKiroExchangeRedirectURI(callbackURL *url.URL) string {
 	return parsed.String()
 }
 
+func fetchKiroQuotaIdentityDefault(ctx context.Context, cfg *config.Config, bundle *kiro.TokenBundle, method string) (storage.QuotaData, error) {
+	if bundle == nil || strings.TrimSpace(bundle.AccessToken) == "" {
+		return storage.QuotaData{}, fmt.Errorf("missing kiro access token")
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	region := strings.TrimSpace(bundle.Region)
+	if region == "" {
+		region = kiro.DefaultRegion
+	}
+	client := util.SetProxy(&cfg.SDKConfig, &http.Client{Timeout: 30 * time.Second})
+	return quotaProviders.NewKiro(client).Fetch(ctx, quotaProviders.QuotaFetchInput{
+		ProviderID: "kiro",
+		Secret:     strings.TrimSpace(bundle.AccessToken),
+		Metadata: map[string]any{
+			"auth_method":   strings.TrimSpace(method),
+			"profile_arn":   strings.TrimSpace(bundle.ProfileARN),
+			"region":        region,
+			"client_id":     strings.TrimSpace(bundle.ClientID),
+			"client_secret": strings.TrimSpace(bundle.ClientSecret),
+		},
+		OAuthRefreshToken: strings.TrimSpace(bundle.RefreshToken),
+	})
+}
+
+func (h *Handler) enrichKiroBundleWithQuotaIdentity(ctx context.Context, bundle *kiro.TokenBundle, method string) storage.QuotaData {
+	if bundle == nil || strings.TrimSpace(bundle.Email) != "" || strings.TrimSpace(bundle.AccessToken) == "" {
+		return storage.QuotaData{}
+	}
+	data, err := fetchKiroQuotaIdentity(ctx, h.cfg, bundle, method)
+	if err != nil {
+		log.Debugf("kiro quota identity lookup failed: %v", err)
+		return storage.QuotaData{}
+	}
+	email := quota.ProviderDataAccountLabel("kiro", data)
+	if strings.Contains(email, "@") {
+		bundle.Email = email
+	}
+	return data
+}
+
+func applyKiroQuotaIdentityToAuthRecord(record *coreauth.Auth, data storage.QuotaData) {
+	if record == nil {
+		return
+	}
+	email := quota.ProviderDataAccountLabel("kiro", data)
+	if !strings.Contains(email, "@") {
+		return
+	}
+	if record.Metadata == nil {
+		record.Metadata = map[string]any{}
+	}
+	if record.Attributes == nil {
+		record.Attributes = map[string]string{}
+	}
+	record.Metadata[quota.MetadataKey] = data
+	record.Metadata["email"] = email
+	record.Attributes["email"] = email
+}
+
 func (h *Handler) completeKiroOAuthCallback(ctx context.Context, sessionID, state, code, redirectURIOverride string) (providerOAuthSessionResponse, error) {
 	session, ok := providerOAuthSessions.Session(sessionID)
 	if !ok {
@@ -629,7 +695,9 @@ func (h *Handler) completeKiroOAuthCallback(ctx context.Context, sessionID, stat
 		SetOAuthSessionError(session.State, err.Error())
 		return providerOAuthSessionResponse{}, err
 	}
+	quotaData := h.enrichKiroBundleWithQuotaIdentity(ctx, bundle, session.Method)
 	record := sdkAuth.BuildKiroAuthRecord(bundle, session.Method)
+	applyKiroQuotaIdentityToAuthRecord(record, quotaData)
 	if record.Metadata == nil {
 		record.Metadata = map[string]any{}
 	}
@@ -689,7 +757,9 @@ func (h *Handler) pollKiroDeviceAuthorization(ctx context.Context, sessionID, st
 			failProviderOAuthSession(sessionID, "Kiro device authorization returned no token")
 			return
 		}
+		quotaData := h.enrichKiroBundleWithQuotaIdentity(ctx, result.Bundle, "aws-device")
 		record := sdkAuth.BuildKiroAuthRecord(result.Bundle, "aws-device")
+		applyKiroQuotaIdentityToAuthRecord(record, quotaData)
 		savedPath, errSave := h.saveTokenRecord(ctx, record)
 		if errSave != nil {
 			log.Errorf("Failed to save Kiro token: %v", errSave)

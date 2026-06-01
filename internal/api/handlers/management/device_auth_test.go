@@ -17,6 +17,8 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/copilot"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kiro"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/quota/storage"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
@@ -239,6 +241,55 @@ func TestRequestKiroTokenStartsDeviceFlowAndSavesAuth(t *testing.T) {
 	waitForSessionRemoved(t, state)
 }
 
+func TestRequestKiroTokenUsesQuotaEmailWhenDeviceTokenOmitsEmail(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+	gin.SetMode(gin.TestMode)
+	resetOAuthSessionsForTest(t)
+
+	origFactory := newKiroDeviceAuth
+	newKiroDeviceAuth = func(*config.Config) kiroDeviceAuth {
+		return fakeKiroDeviceAuthWithoutEmail{}
+	}
+	t.Cleanup(func() { newKiroDeviceAuth = origFactory })
+
+	origFetch := fetchKiroQuotaIdentity
+	fetchKiroQuotaIdentity = func(_ context.Context, _ *config.Config, bundle *kiro.TokenBundle, method string) (storage.QuotaData, error) {
+		if method != "aws-device" {
+			t.Fatalf("method = %q, want aws-device", method)
+		}
+		if bundle == nil || bundle.ProfileARN != "arn:aws:kiro:us-east-1:123:profile/dev" {
+			t.Fatalf("bundle profile arn = %#v", bundle)
+		}
+		return storage.QuotaData{
+			ProviderData: &storage.ProviderQuotaData{
+				AccountLabel: "dev@example.com",
+			},
+		}, nil
+	}
+	t.Cleanup(func() { fetchKiroQuotaIdentity = origFetch })
+
+	store := &memoryAuthStore{}
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, coreauth.NewManager(nil, nil, nil))
+	h.tokenStore = store
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v0/management/kiro-auth-url?method=device_code", nil)
+	h.RequestKiroToken(ctx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	auth := waitForSavedAuthRecord(t, store, "kiro-aws-device-dev-example.com.json")
+	if got := metaStringValue(auth.Metadata, "email"); got != "dev@example.com" {
+		t.Fatalf("email = %q", got)
+	}
+	if _, ok := auth.Metadata[quota.MetadataKey]; !ok {
+		t.Fatalf("expected quota data metadata")
+	}
+}
+
 func TestStartProviderOAuthKiroSignInCallbackSavesFullAuth(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "")
 	gin.SetMode(gin.TestMode)
@@ -256,12 +307,27 @@ func TestStartProviderOAuthKiroSignInCallbackSavesFullAuth(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"accessToken":"kiro-access","refreshToken":"kiro-refresh","profileArn":"arn:aws:kiro:us-east-1:123:profile/dev","expiresIn":3600,"email":"dev@example.com","username":"dev","sub":"subject-1"}`))
+		_, _ = w.Write([]byte(`{"accessToken":"kiro-access","refreshToken":"kiro-refresh","profileArn":"arn:aws:kiro:us-east-1:123:profile/dev","expiresIn":3600}`))
 	}))
 	defer tokenServer.Close()
 	origSocialToken := kiro.SocialToken
 	kiro.SocialToken = tokenServer.URL
 	t.Cleanup(func() { kiro.SocialToken = origSocialToken })
+	origFetch := fetchKiroQuotaIdentity
+	fetchKiroQuotaIdentity = func(_ context.Context, _ *config.Config, bundle *kiro.TokenBundle, method string) (storage.QuotaData, error) {
+		if method != "signin_localhost" {
+			t.Fatalf("method = %q, want signin_localhost", method)
+		}
+		if bundle == nil || bundle.ProfileARN != "arn:aws:kiro:us-east-1:123:profile/dev" {
+			t.Fatalf("bundle profile arn = %#v", bundle)
+		}
+		return storage.QuotaData{
+			ProviderData: &storage.ProviderQuotaData{
+				AccountLabel: "dev@example.com",
+			},
+		}, nil
+	}
+	t.Cleanup(func() { fetchKiroQuotaIdentity = origFetch })
 
 	store := &memoryAuthStore{}
 	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, coreauth.NewManager(nil, nil, nil))
@@ -304,6 +370,9 @@ func TestStartProviderOAuthKiroSignInCallbackSavesFullAuth(t *testing.T) {
 
 	waitForProviderOAuthStatus(t, started.SessionID, providerOAuthSessionCompleted)
 	auth := waitForSavedProviderAuth(t, store, "kiro")
+	if auth.ID != "kiro-signin_localhost-dev-example.com.json" {
+		t.Fatalf("auth id = %q, want email-based id", auth.ID)
+	}
 	if got := metaStringValue(auth.Metadata, "profile_arn"); got != "arn:aws:kiro:us-east-1:123:profile/dev" {
 		t.Fatalf("profile_arn = %q", got)
 	}
@@ -312,6 +381,9 @@ func TestStartProviderOAuthKiroSignInCallbackSavesFullAuth(t *testing.T) {
 	}
 	if got := metaStringValue(auth.Metadata, "email"); got != "dev@example.com" {
 		t.Fatalf("email = %q", got)
+	}
+	if _, ok := auth.Metadata[quota.MetadataKey]; !ok {
+		t.Fatalf("expected quota data metadata")
 	}
 	select {
 	case seen := <-redirectURISeen:
@@ -426,17 +498,23 @@ func callbackForwarderIsActive(port int, provider string) bool {
 
 func waitForSavedAuth(t *testing.T, store *memoryAuthStore, id string) {
 	t.Helper()
+	_ = waitForSavedAuthRecord(t, store, id)
+}
+
+func waitForSavedAuthRecord(t *testing.T, store *memoryAuthStore, id string) *coreauth.Auth {
+	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		store.mu.Lock()
-		_, ok := store.items[id]
+		auth, ok := store.items[id]
 		store.mu.Unlock()
 		if ok {
-			return
+			return auth
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("auth %q was not saved", id)
+	return nil
 }
 
 func waitForSavedProviderAuth(t *testing.T, store *memoryAuthStore, provider string) *coreauth.Auth {
@@ -537,5 +615,21 @@ func (fakeKiroDeviceAuth) PollDeviceToken(context.Context, string, string, strin
 		Region:       kiro.DefaultRegion,
 		ExpiresAt:    time.Now().Add(time.Hour),
 		Email:        "dev@example.com",
+	}}
+}
+
+type fakeKiroDeviceAuthWithoutEmail struct {
+	fakeKiroDeviceAuth
+}
+
+func (fakeKiroDeviceAuthWithoutEmail) PollDeviceToken(context.Context, string, string, string, string) kiro.DevicePollResult {
+	return kiro.DevicePollResult{Bundle: &kiro.TokenBundle{
+		AccessToken:  "kiro-access-token",
+		RefreshToken: "kiro-refresh-token",
+		ProfileARN:   "arn:aws:kiro:us-east-1:123:profile/dev",
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		Region:       kiro.DefaultRegion,
+		ExpiresAt:    time.Now().Add(time.Hour),
 	}}
 }
