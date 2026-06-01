@@ -6,11 +6,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
@@ -88,6 +90,75 @@ func TestVirtualModelsManagementRejectsInvalidPayload(t *testing.T) {
 	}
 	if len(h.cfg.VirtualModels) != 0 {
 		t.Fatalf("invalid payload persisted: %#v", h.cfg.VirtualModels)
+	}
+}
+
+func TestVirtualModelAvailableTargetsListsRegistryModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient("virtual-targets-codex", "codex", []*registry.ModelInfo{
+		{ID: "z-model"},
+		{ID: "a-model"},
+	})
+	reg.RegisterClient("virtual-targets-claude", "claude", []*registry.ModelInfo{
+		{ID: "a-model"},
+	})
+	t.Cleanup(func() {
+		reg.UnregisterClient("virtual-targets-codex")
+		reg.UnregisterClient("virtual-targets-claude")
+	})
+
+	h := NewHandler(&config.Config{}, "", coreauth.NewManager(nil, nil, nil))
+	rec := performVirtualModelsRequest(h.GetVirtualModelAvailableTargets, http.MethodGet, "/v0/management/virtual-models/available-targets", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Targets []struct {
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+			Target   string `json:"target"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
+	}
+
+	got := make([]string, 0, len(payload.Targets))
+	targetsByName := make(map[string]struct {
+		Provider string
+		Model    string
+	}, len(payload.Targets))
+	for _, target := range payload.Targets {
+		got = append(got, target.Target)
+		targetsByName[target.Target] = struct {
+			Provider string
+			Model    string
+		}{
+			Provider: target.Provider,
+			Model:    target.Model,
+		}
+	}
+	if !sort.StringsAreSorted(got) {
+		t.Fatalf("targets are not sorted: %#v", got)
+	}
+	want := map[string]struct {
+		provider string
+		model    string
+	}{
+		"claude/a-model": {provider: "claude", model: "a-model"},
+		"codex/a-model":  {provider: "codex", model: "a-model"},
+		"codex/z-model":  {provider: "codex", model: "z-model"},
+	}
+	for target, wantMeta := range want {
+		gotMeta, ok := targetsByName[target]
+		if !ok {
+			t.Fatalf("missing target %q in %#v", target, got)
+		}
+		if gotMeta.Provider != wantMeta.provider || gotMeta.Model != wantMeta.model {
+			t.Fatalf("target %q metadata = %#v, want provider=%q model=%q", target, gotMeta, wantMeta.provider, wantMeta.model)
+		}
 	}
 }
 

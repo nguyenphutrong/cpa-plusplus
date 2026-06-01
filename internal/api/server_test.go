@@ -243,6 +243,50 @@ func TestManagementUsageRequiresManagementAuthAndPopsArray(t *testing.T) {
 	}
 }
 
+func TestManagementVirtualModelsRoutes(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
+
+	server := newTestServer(t)
+	if err := os.WriteFile(server.configFilePath, []byte("port: 0\n"), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v0/management/virtual-models", nil)
+	getReq.Header.Set("Authorization", "Bearer test-management-key")
+	getRR := httptest.NewRecorder()
+	server.engine.ServeHTTP(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("GET virtual-models status = %d body=%s", getRR.Code, getRR.Body.String())
+	}
+
+	putBody := `{"enabled":true,"cache_ttl":"45s","max_depth":4,"virtual_models":{"fast":{"targets":[{"target":"codex/gpt-5.1"}]}}}`
+	putReq := httptest.NewRequest(http.MethodPut, "/v0/management/virtual-models", strings.NewReader(putBody))
+	putReq.Header.Set("Authorization", "Bearer test-management-key")
+	putReq.Header.Set("Content-Type", "application/json")
+	putRR := httptest.NewRecorder()
+	server.engine.ServeHTTP(putRR, putReq)
+	if putRR.Code != http.StatusOK {
+		t.Fatalf("PUT virtual-models status = %d body=%s", putRR.Code, putRR.Body.String())
+	}
+
+	targetsReq := httptest.NewRequest(http.MethodGet, "/v0/management/virtual-models/available-targets", nil)
+	targetsReq.Header.Set("Authorization", "Bearer test-management-key")
+	targetsRR := httptest.NewRecorder()
+	server.engine.ServeHTTP(targetsRR, targetsReq)
+	if targetsRR.Code != http.StatusOK {
+		t.Fatalf("GET available-targets status = %d body=%s", targetsRR.Code, targetsRR.Body.String())
+	}
+
+	patchReq := httptest.NewRequest(http.MethodPatch, "/v0/management/virtual-models/enabled", strings.NewReader(`{"enabled":false}`))
+	patchReq.Header.Set("Authorization", "Bearer test-management-key")
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchRR := httptest.NewRecorder()
+	server.engine.ServeHTTP(patchRR, patchReq)
+	if patchRR.Code != http.StatusOK {
+		t.Fatalf("PATCH virtual-models/enabled status = %d body=%s", patchRR.Code, patchRR.Body.String())
+	}
+}
+
 func TestHomeEnabledHidesManagementEndpointsAndControlPanel(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
 
