@@ -71,11 +71,11 @@ func TestGetRequestDetails_PreservesSuffix(t *testing.T) {
 			wantErr:       false,
 		},
 		{
-			name:          "bare concrete model rejected",
+			name:          "bare concrete model resolves",
 			inputModel:    "gpt-5.2(high)",
-			wantProviders: nil,
-			wantModel:     "",
-			wantErr:       true,
+			wantProviders: []string{"openai"},
+			wantModel:     "gpt-5.2(high)",
+			wantErr:       false,
 		},
 		{
 			name:          "unknown model with suffix",
@@ -121,6 +121,118 @@ func TestGetRequestDetails_PreservesSuffix(t *testing.T) {
 			}
 			if model != tt.wantModel {
 				t.Fatalf("getRequestDetails() model = %v, want %v", model, tt.wantModel)
+			}
+		})
+	}
+}
+
+func TestGetRequestDetails_BareConcreteModelProviderPriority(t *testing.T) {
+	modelRegistry := registry.GetGlobalRegistry()
+	registrations := []struct {
+		clientID string
+		provider string
+		model    string
+	}{
+		{"test-request-details-priority-gpt-openai", "openai", "gpt-priority-test"},
+		{"test-request-details-priority-gpt-copilot", "github-copilot", "gpt-priority-test"},
+		{"test-request-details-priority-gpt-codex", "codex", "gpt-priority-test"},
+		{"test-request-details-priority-gpt-compat", "openai-compatibility", "gpt-priority-test"},
+		{"test-request-details-priority-claude-anthropic", "anthropic", "claude-priority-test"},
+		{"test-request-details-priority-claude-copilot", "github-copilot", "claude-priority-test"},
+		{"test-request-details-priority-claude-kiro", "kiro", "claude-priority-test"},
+		{"test-request-details-priority-claude-code", "claude", "claude-priority-test"},
+		{"test-request-details-priority-claude-vertex", "vertex-anthropic", "claude-priority-test"},
+		{"test-request-details-priority-claude-compat", "openai-compatibility", "claude-priority-test"},
+		{"test-request-details-priority-gemini-compat", "openai-compatibility", "gemini-priority-test"},
+		{"test-request-details-priority-gemini-antigravity", "antigravity", "gemini-priority-test"},
+		{"test-request-details-priority-gemini-vertex", "vertex", "gemini-priority-test"},
+		{"test-request-details-priority-gemini-aistudio", "aistudio", "gemini-priority-test"},
+		{"test-request-details-priority-gemini-cli", "gemini-cli", "gemini-priority-test"},
+		{"test-request-details-priority-gemini", "gemini", "gemini-priority-test"},
+		{"test-request-details-priority-grok-compat", "openai-compatibility", "grok-priority-test"},
+		{"test-request-details-priority-grok-copilot", "github-copilot", "grok-priority-test"},
+		{"test-request-details-priority-grok-xai", "xai", "grok-priority-test"},
+		{"test-request-details-priority-gpt-copilot-hint-codex", "codex", "gpt-copilot-priority"},
+		{"test-request-details-priority-gpt-copilot-hint-copilot", "github-copilot", "gpt-copilot-priority"},
+		{"test-request-details-priority-claude-kiro-hint-claude", "claude", "claude-kiro-priority"},
+		{"test-request-details-priority-claude-kiro-hint-kiro", "kiro", "claude-kiro-priority"},
+	}
+	for _, registration := range registrations {
+		modelRegistry.RegisterClient(registration.clientID, registration.provider, []*registry.ModelInfo{{ID: registration.model}})
+		clientID := registration.clientID
+		t.Cleanup(func() {
+			modelRegistry.UnregisterClient(clientID)
+		})
+	}
+
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, coreauth.NewManager(nil, nil, nil))
+
+	tests := []struct {
+		name          string
+		inputModel    string
+		wantProviders []string
+		wantModel     string
+	}{
+		{
+			name:          "gpt family",
+			inputModel:    "gpt-priority-test(high)",
+			wantProviders: []string{"codex", "github-copilot", "openai", "openai-compatibility"},
+			wantModel:     "gpt-priority-test(high)",
+		},
+		{
+			name:          "claude family",
+			inputModel:    "claude-priority-test",
+			wantProviders: []string{"claude", "kiro", "github-copilot", "anthropic", "vertex-anthropic", "openai-compatibility"},
+			wantModel:     "claude-priority-test",
+		},
+		{
+			name:          "gemini family",
+			inputModel:    "gemini-priority-test",
+			wantProviders: []string{"gemini", "gemini-cli", "aistudio", "vertex", "antigravity", "openai-compatibility"},
+			wantModel:     "gemini-priority-test",
+		},
+		{
+			name:          "grok family",
+			inputModel:    "grok-priority-test",
+			wantProviders: []string{"xai", "github-copilot", "openai-compatibility"},
+			wantModel:     "grok-priority-test",
+		},
+		{
+			name:          "provider hint wins before family default",
+			inputModel:    "gpt-copilot-priority",
+			wantProviders: []string{"github-copilot", "codex"},
+			wantModel:     "gpt-copilot-priority",
+		},
+		{
+			name:          "kiro hint wins before claude family default",
+			inputModel:    "claude-kiro-priority",
+			wantProviders: []string{"kiro", "claude"},
+			wantModel:     "claude-kiro-priority",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			details := handler.getRequestDetailsForExecution(tt.inputModel, false)
+			if details.err != nil {
+				t.Fatalf("getRequestDetailsForExecution() error = %v", details.err)
+			}
+			if !reflect.DeepEqual(details.providers, tt.wantProviders) {
+				t.Fatalf("providers = %#v, want %#v", details.providers, tt.wantProviders)
+			}
+			if details.normalizedModel != tt.wantModel {
+				t.Fatalf("normalizedModel = %q, want %q", details.normalizedModel, tt.wantModel)
+			}
+			if len(details.virtualTargets) != len(tt.wantProviders) {
+				t.Fatalf("virtualTargets = %#v", details.virtualTargets)
+			}
+			for i, provider := range tt.wantProviders {
+				if details.virtualTargets[i].Provider != provider {
+					t.Fatalf("virtualTargets[%d].Provider = %q, want %q", i, details.virtualTargets[i].Provider, provider)
+				}
+				if details.virtualTargets[i].Model != tt.wantModel {
+					t.Fatalf("virtualTargets[%d].Model = %q, want %q", i, details.virtualTargets[i].Model, tt.wantModel)
+				}
 			}
 		})
 	}
@@ -179,6 +291,40 @@ func TestGetRequestDetails_VirtualModel(t *testing.T) {
 	}
 	if details.virtualTargets[0].Model != "gpt-5.1(high)" {
 		t.Fatalf("first target model = %q", details.virtualTargets[0].Model)
+	}
+}
+
+func TestGetRequestDetails_VirtualModelPrecedesBareConcreteResolver(t *testing.T) {
+	modelRegistry := registry.GetGlobalRegistry()
+	modelRegistry.RegisterClient("test-request-details-virtual-priority-codex", "codex", []*registry.ModelInfo{{ID: "gpt-virtual-priority"}})
+	modelRegistry.RegisterClient("test-request-details-virtual-priority-openai", "openai", []*registry.ModelInfo{{ID: "gpt-virtual-target"}})
+	t.Cleanup(func() {
+		modelRegistry.UnregisterClient("test-request-details-virtual-priority-codex")
+		modelRegistry.UnregisterClient("test-request-details-virtual-priority-openai")
+	})
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	manager.SetConfig(&sdkconfig.Config{
+		VirtualModels: map[string]sdkconfig.VirtualModelConfig{
+			"gpt-virtual-priority": {
+				Targets: []sdkconfig.VirtualModelTarget{{Target: "openai/gpt-virtual-target"}},
+			},
+		},
+	})
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)
+
+	details := handler.getRequestDetailsForExecution("gpt-virtual-priority(high)", false)
+	if details.err != nil {
+		t.Fatalf("getRequestDetailsForExecution() error = %v", details.err)
+	}
+	if !reflect.DeepEqual(details.providers, []string{"openai"}) {
+		t.Fatalf("providers = %#v", details.providers)
+	}
+	if details.normalizedModel != "gpt-virtual-priority(high)" {
+		t.Fatalf("normalizedModel = %q", details.normalizedModel)
+	}
+	if len(details.virtualTargets) != 1 || details.virtualTargets[0].Model != "gpt-virtual-target(high)" {
+		t.Fatalf("virtualTargets = %#v", details.virtualTargets)
 	}
 }
 

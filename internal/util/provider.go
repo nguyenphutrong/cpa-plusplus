@@ -53,10 +53,102 @@ func GetProviderName(modelName string) []string {
 	}
 
 	if len(providers) > 0 {
-		return providers
+		return orderProvidersForModel(modelName, providers)
 	}
 
 	return providers
+}
+
+func orderProvidersForModel(modelName string, providers []string) []string {
+	if len(providers) <= 1 {
+		return providers
+	}
+
+	priority := providerPriorityForModel(modelName)
+	if len(priority) == 0 {
+		return providers
+	}
+
+	out := make([]string, 0, len(providers))
+	used := make(map[string]struct{}, len(providers))
+	appendIfAvailable := func(provider string) {
+		provider = strings.TrimSpace(strings.ToLower(provider))
+		if provider == "" {
+			return
+		}
+		if _, ok := used[provider]; ok {
+			return
+		}
+		for _, candidate := range providers {
+			candidate = strings.TrimSpace(strings.ToLower(candidate))
+			if candidate == provider {
+				used[provider] = struct{}{}
+				out = append(out, provider)
+				return
+			}
+		}
+	}
+
+	for _, provider := range priority {
+		appendIfAvailable(provider)
+	}
+	for _, provider := range providers {
+		appendIfAvailable(provider)
+	}
+	return out
+}
+
+func providerPriorityForModel(modelName string) []string {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	familyPriority := familyProviderPriority(modelName)
+	switch {
+	case strings.Contains(modelName, "codex"):
+		return mergeProviderPriority([]string{"codex"}, familyPriority)
+	case strings.Contains(modelName, "copilot"):
+		return mergeProviderPriority([]string{"github-copilot"}, familyPriority)
+	case strings.Contains(modelName, "kiro"):
+		return mergeProviderPriority([]string{"kiro"}, familyPriority)
+	default:
+		return familyPriority
+	}
+}
+
+func familyProviderPriority(modelName string) []string {
+	switch {
+	case strings.HasPrefix(modelName, "gpt-"):
+		return []string{"codex", "github-copilot", "openai", "openai-compatibility"}
+	case strings.HasPrefix(modelName, "claude-"):
+		return []string{"claude", "kiro", "github-copilot", "anthropic", "vertex-anthropic", "openai-compatibility"}
+	case strings.HasPrefix(modelName, "gemini-"):
+		return []string{"gemini", "gemini-cli", "aistudio", "vertex", "antigravity", "openai-compatibility"}
+	case strings.HasPrefix(modelName, "grok-"):
+		return []string{"xai", "github-copilot", "openai-compatibility"}
+	default:
+		return nil
+	}
+}
+
+func mergeProviderPriority(first, fallback []string) []string {
+	priority := make([]string, 0, len(first)+len(fallback))
+	seen := make(map[string]struct{}, len(first)+len(fallback))
+	appendProvider := func(provider string) {
+		provider = strings.TrimSpace(strings.ToLower(provider))
+		if provider == "" {
+			return
+		}
+		if _, ok := seen[provider]; ok {
+			return
+		}
+		seen[provider] = struct{}{}
+		priority = append(priority, provider)
+	}
+	for _, provider := range first {
+		appendProvider(provider)
+	}
+	for _, provider := range fallback {
+		appendProvider(provider)
+	}
+	return priority
 }
 
 // ResolveAutoModel resolves the "auto" model name to an actual available model.

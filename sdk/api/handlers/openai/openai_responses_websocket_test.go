@@ -1162,6 +1162,30 @@ func TestResponsesWebsocketProviderSetForPrefixedModel(t *testing.T) {
 	}
 }
 
+func TestResponsesWebsocketProviderSetForBareModel(t *testing.T) {
+	registry.GetGlobalRegistry().RegisterClient("responses-ws-codex-bare", "codex", []*registry.ModelInfo{{ID: "gpt-ws-priority"}})
+	registry.GetGlobalRegistry().RegisterClient("responses-ws-copilot-bare", "github-copilot", []*registry.ModelInfo{{ID: "gpt-ws-priority"}})
+	registry.GetGlobalRegistry().RegisterClient("responses-ws-openai-bare", "openai", []*registry.ModelInfo{{ID: "gpt-ws-priority"}})
+	t.Cleanup(func() {
+		registry.GetGlobalRegistry().UnregisterClient("responses-ws-codex-bare")
+		registry.GetGlobalRegistry().UnregisterClient("responses-ws-copilot-bare")
+		registry.GetGlobalRegistry().UnregisterClient("responses-ws-openai-bare")
+	})
+
+	providers, modelKey := responsesWebsocketProviderSetForModel("gpt-ws-priority(high)")
+	if modelKey != "gpt-ws-priority" {
+		t.Fatalf("modelKey = %q, want gpt-ws-priority", modelKey)
+	}
+	for _, provider := range []string{"codex", "github-copilot", "openai"} {
+		if _, ok := providers[provider]; !ok {
+			t.Fatalf("providers = %#v, missing %s", providers, provider)
+		}
+	}
+	if len(providers) != 3 {
+		t.Fatalf("providers = %#v, want three providers", providers)
+	}
+}
+
 func TestResponsesWebsocketPrewarmHandledLocallyForSSEUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -956,7 +956,10 @@ func (h *BaseAPIHandler) getRequestDetailsForExecution(modelName string, allowIm
 
 	provider, localModel, ok := routeProviderQualifiedModel(parsed)
 	if !ok {
-		return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("model %s must use provider/model", modelName)}}
+		if strings.Contains(parsed.ModelName, "/") {
+			return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("model %s must use provider/model", modelName)}}
+		}
+		return routeBareConcreteModel(parsed, modelName, allowImageModel)
 	}
 	if !providerServesModel(provider, localModel) {
 		return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("unknown provider for model %s", modelName)}}
@@ -982,6 +985,46 @@ func routeProviderQualifiedModel(parsed thinking.SuffixResult) (string, string, 
 		localModel = fmt.Sprintf("%s(%s)", localModel, parsed.RawSuffix)
 	}
 	return provider, localModel, true
+}
+
+func routeBareConcreteModel(parsed thinking.SuffixResult, requestedModel string, allowImageModel bool) requestDetails {
+	baseModel := strings.TrimSpace(parsed.ModelName)
+	if baseModel == "" {
+		return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("unknown model %s", requestedModel)}}
+	}
+
+	localModel := baseModel
+	if parsed.HasSuffix {
+		localModel = fmt.Sprintf("%s(%s)", baseModel, parsed.RawSuffix)
+	}
+	if strings.EqualFold(routeModelBaseName(localModel), "gpt-image-2") && !allowImageModel {
+		return requestDetails{err: &interfaces.ErrorMessage{
+			StatusCode: http.StatusServiceUnavailable,
+			Error:      fmt.Errorf("model %s is only supported on /v1/images/generations and /v1/images/edits", routeModelBaseName(localModel)),
+		}}
+	}
+
+	providers := util.GetProviderName(baseModel)
+	if len(providers) == 0 {
+		return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("unknown model %s", requestedModel)}}
+	}
+
+	targets := make([]routing.VirtualTarget, 0, len(providers))
+	for _, provider := range providers {
+		provider = strings.TrimSpace(strings.ToLower(provider))
+		if provider == "" {
+			continue
+		}
+		targets = append(targets, routing.VirtualTarget{Provider: provider, Model: localModel})
+	}
+	if len(targets) == 0 {
+		return requestDetails{err: &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("unknown model %s", requestedModel)}}
+	}
+	return requestDetails{
+		providers:       providersFromVirtualTargets(targets),
+		normalizedModel: localModel,
+		virtualTargets:  targets,
+	}
 }
 
 func providerServesModel(provider, model string) bool {
