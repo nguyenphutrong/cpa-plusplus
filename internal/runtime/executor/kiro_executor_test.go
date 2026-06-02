@@ -1,7 +1,10 @@
 package executor
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/binary"
 	"strings"
 	"testing"
 
@@ -77,6 +80,66 @@ func TestNormalizeKiroModelPreservesKiroModelIDs(t *testing.T) {
 	}
 }
 
+func TestExtractKiroTextPreservesWhitespace(t *testing.T) {
+	cases := map[string]string{
+		`{"assistantResponseEvent":{"content":" world"}}`:       " world",
+		`{"assistantResponseEvent":{"content":"line1\nline2"}}`: "line1\nline2",
+		`{"content":"\n\n"}`:                "\n\n",
+		`{"content":"  trailing  "}`:        "  trailing  ",
+		`{"usageEvent":{"inputTokens":5}}`:  "",
+		`{"content":"","text":" fallback"}`: " fallback",
+	}
+	for payload, want := range cases {
+		if got := extractKiroText([]byte(payload)); got != want {
+			t.Fatalf("extractKiroText(%s) = %q, want %q", payload, got, want)
+		}
+	}
+}
+
+func TestStreamKiroTextDeltasConcatenateVerbatim(t *testing.T) {
+	ctx := context.Background()
+	model := "claude-sonnet-4.5"
+	original := []byte(`{"model":"claude-sonnet-4.5","input":"hi","stream":true}`)
+
+	deltas := []string{"Hello", " world.", "\n\nNext", " line"}
+
+	var paramChat any
+	var paramResp any
+	var all []byte
+	collect := func(event []byte) {
+		for _, chunk := range translateKiroStreamToResponses(ctx, model, original, original, event, &paramChat, &paramResp) {
+			all = append(all, chunk...)
+		}
+	}
+
+	collect(kiroclaude.BuildClaudeMessageStartEvent(model, 0))
+	collect(kiroclaude.BuildClaudeContentBlockStartEvent(0, "text", "", ""))
+	for _, d := range deltas {
+		collect(kiroclaude.BuildClaudeStreamEvent(d, 0))
+	}
+	collect(kiroclaude.BuildClaudeContentBlockStopEvent(0))
+	collect(kiroclaude.BuildClaudeMessageDeltaEvent("end_turn", usage.Detail{OutputTokens: 1, TotalTokens: 1}))
+	collect(kiroclaude.BuildClaudeMessageStopOnlyEvent())
+	for _, chunk := range openairesponses.ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx, model, original, original, []byte("[DONE]"), &paramResp) {
+		all = append(all, chunk...)
+	}
+
+	var text strings.Builder
+	for _, line := range strings.Split(string(all), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if gjson.Get(data, "type").String() == "response.output_text.delta" {
+			text.WriteString(gjson.Get(data, "delta").String())
+		}
+	}
+	if got, want := text.String(), strings.Join(deltas, ""); got != want {
+		t.Fatalf("reconstructed text = %q, want %q", got, want)
+	}
+}
+
 func TestTranslateKiroStreamToResponsesEmitsCompleted(t *testing.T) {
 	ctx := context.Background()
 	model := "claude-sonnet-4.5"
@@ -108,6 +171,131 @@ func TestTranslateKiroStreamToResponsesEmitsCompleted(t *testing.T) {
 	}
 	if !strings.Contains(got, "response.output_text.delta") {
 		t.Fatalf("expected response.output_text.delta event, got: %s", got)
+	}
+}
+
+func buildKiroEventFrame(eventType string, payload string) []byte {
+	headerName := ":event-type"
+	header := []byte{byte(len(headerName))}
+	header = append(header, headerName...)
+	header = append(header, 7)
+	header = append(header, byte(len(eventType)>>8), byte(len(eventType)))
+	header = append(header, eventType...)
+
+	body := []byte(payload)
+	totalLen := 12 + len(header) + len(body) + 4
+	frame := make([]byte, 0, totalLen)
+	var prelude [12]byte
+	binary.BigEndian.PutUint32(prelude[0:4], uint32(totalLen))
+	binary.BigEndian.PutUint32(prelude[4:8], uint32(len(header)))
+	frame = append(frame, prelude[:]...)
+	frame = append(frame, header...)
+	frame = append(frame, body...)
+	frame = append(frame, 0, 0, 0, 0) // message CRC (unused by reader)
+	return frame
+}
+
+func TestReadKiroEventFrameParsesEventType(t *testing.T) {
+	frame := buildKiroEventFrame("toolUseEvent", `{"toolUseId":"call_1","name":"search","input":"{\"q\":1}"}`)
+	reader := bufio.NewReader(bytes.NewReader(frame))
+
+	eventType, payload, err := readKiroEventFrame(reader)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if eventType != "toolUseEvent" {
+		t.Fatalf("eventType = %q, want toolUseEvent", eventType)
+	}
+	if got := gjson.GetBytes(payload, "toolUseId").String(); got != "call_1" {
+		t.Fatalf("toolUseId = %q, want call_1", got)
+	}
+}
+
+func TestExtractKiroToolUse(t *testing.T) {
+	id, name, input := extractKiroToolUse([]byte(`{"toolUseId":"call_1","name":"search","input":"{\"q\":1}"}`))
+	if id != "call_1" || name != "search" || input != `{"q":1}` {
+		t.Fatalf("flat = (%q,%q,%q)", id, name, input)
+	}
+
+	id, name, input = extractKiroToolUse([]byte(`{"toolUseEvent":{"toolUseId":"call_2","name":"read","input":{"path":"/a"}}}`))
+	if id != "call_2" || name != "read" || input != `{"path":"/a"}` {
+		t.Fatalf("nested = (%q,%q,%q)", id, name, input)
+	}
+
+	if !isKiroToolUseEvent("toolUseEvent", nil) {
+		t.Fatalf("expected toolUseEvent header to be detected")
+	}
+	if !isKiroToolUseEvent("", []byte(`{"toolUseId":"x"}`)) {
+		t.Fatalf("expected toolUseId payload to be detected")
+	}
+	if isKiroToolUseEvent("assistantResponseEvent", []byte(`{"content":"hi"}`)) {
+		t.Fatalf("text event should not be detected as tool use")
+	}
+}
+
+func TestParseKiroEventStreamPayloadsNativeToolUse(t *testing.T) {
+	var raw []byte
+	raw = append(raw, buildKiroEventFrame("assistantResponseEvent", `{"content":"Let me check. "}`)...)
+	raw = append(raw, buildKiroEventFrame("toolUseEvent", `{"toolUseId":"call_1","name":"get_weather","input":"{\"city\":"}`)...)
+	raw = append(raw, buildKiroEventFrame("toolUseEvent", `{"toolUseId":"call_1","input":"\"Hanoi\"}"}`)...)
+	raw = append(raw, buildKiroEventFrame("messageStopEvent", `{}`)...)
+
+	content, toolUses, _, stopReason := parseKiroEventStreamPayloads(raw)
+	if content != "Let me check. " {
+		t.Fatalf("content = %q", content)
+	}
+	if stopReason != "tool_use" {
+		t.Fatalf("stopReason = %q, want tool_use", stopReason)
+	}
+	if len(toolUses) != 1 {
+		t.Fatalf("len(toolUses) = %d, want 1", len(toolUses))
+	}
+	if toolUses[0].ToolUseID != "call_1" || toolUses[0].Name != "get_weather" {
+		t.Fatalf("toolUse identity = %+v", toolUses[0])
+	}
+	if got, _ := toolUses[0].Input["city"].(string); got != "Hanoi" {
+		t.Fatalf("tool input city = %q, want Hanoi", got)
+	}
+}
+
+func TestStreamKiroToolUseProducesFunctionCall(t *testing.T) {
+	ctx := context.Background()
+	model := "claude-sonnet-4.5"
+	original := []byte(`{"model":"claude-sonnet-4.5","input":"weather?","stream":true}`)
+
+	var paramChat any
+	var paramResp any
+	var all []byte
+	collect := func(event []byte) {
+		for _, chunk := range translateKiroStreamToResponses(ctx, model, original, original, event, &paramChat, &paramResp) {
+			all = append(all, chunk...)
+		}
+	}
+
+	collect(kiroclaude.BuildClaudeMessageStartEvent(model, 0))
+	collect(kiroclaude.BuildClaudeContentBlockStartEvent(0, "text", "", ""))
+	collect(kiroclaude.BuildClaudeContentBlockStartEvent(1, "tool_use", "call_1", "get_weather"))
+	collect(kiroclaude.BuildClaudeInputJsonDeltaEvent(`{"city":"Hanoi"}`, 1))
+	collect(kiroclaude.BuildClaudeContentBlockStopEvent(0))
+	collect(kiroclaude.BuildClaudeContentBlockStopEvent(1))
+	collect(kiroclaude.BuildClaudeMessageDeltaEvent("tool_use", usage.Detail{OutputTokens: 1, TotalTokens: 1}))
+	collect(kiroclaude.BuildClaudeMessageStopOnlyEvent())
+	for _, chunk := range openairesponses.ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx, model, original, original, []byte("[DONE]"), &paramResp) {
+		all = append(all, chunk...)
+	}
+
+	got := string(all)
+	if !strings.Contains(got, "response.function_call_arguments.done") {
+		t.Fatalf("expected function_call_arguments.done, got: %s", got)
+	}
+	if !strings.Contains(got, "get_weather") {
+		t.Fatalf("expected tool name in output, got: %s", got)
+	}
+	if !strings.Contains(got, "Hanoi") {
+		t.Fatalf("expected tool arguments in output, got: %s", got)
+	}
+	if !strings.Contains(got, "response.completed") {
+		t.Fatalf("expected response.completed, got: %s", got)
 	}
 }
 

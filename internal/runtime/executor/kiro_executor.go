@@ -261,8 +261,15 @@ func (e *KiroExecutor) streamKiroResponse(ctx context.Context, httpResp *http.Re
 
 	reader := bufio.NewReaderSize(httpResp.Body, kiroScannerMaxSize)
 	var outputTokens int64
+	// Kiro delivers tool calls as native toolUseEvent frames. Text stays at content
+	// block index 0; each distinct tool call gets its own block starting at index 1,
+	// which the downstream ConvertKiroStreamToOpenAI translator expects (it derives the
+	// OpenAI tool index from blockIndex-1).
+	toolBlocks := map[string]int{}
+	var toolOrder []int
+	nextToolIndex := 1
 	for {
-		payload, err := readKiroEventPayload(reader)
+		eventType, payload, err := readKiroEventFrame(reader)
 		if err != nil {
 			if err != io.EOF {
 				helps.RecordAPIResponseError(ctx, e.cfg, err)
@@ -275,6 +282,28 @@ func (e *KiroExecutor) streamKiroResponse(ctx context.Context, httpResp *http.Re
 			break
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, payload)
+		if isKiroToolUseEvent(eventType, payload) {
+			id, name, inputFragment := extractKiroToolUse(payload)
+			if id == "" {
+				id = fmt.Sprintf("call_%d", nextToolIndex)
+			}
+			idx, seen := toolBlocks[id]
+			if !seen {
+				idx = nextToolIndex
+				nextToolIndex++
+				toolBlocks[id] = idx
+				toolOrder = append(toolOrder, idx)
+				if !send(kiroclaude.BuildClaudeContentBlockStartEvent(idx, "tool_use", id, name)) {
+					return
+				}
+			}
+			if inputFragment != "" {
+				if !send(kiroclaude.BuildClaudeInputJsonDeltaEvent(inputFragment, idx)) {
+					return
+				}
+			}
+			continue
+		}
 		text := extractKiroText(payload)
 		if text == "" {
 			if detail := extractKiroUsage(payload); detail.TotalTokens > 0 {
@@ -290,8 +319,19 @@ func (e *KiroExecutor) streamKiroResponse(ctx context.Context, httpResp *http.Re
 	}
 	usageDetail := usage.Detail{OutputTokens: outputTokens, TotalTokens: outputTokens}
 	reporter.Publish(ctx, usageDetail)
-	_ = send(kiroclaude.BuildClaudeContentBlockStopEvent(0))
-	_ = send(kiroclaude.BuildClaudeMessageDeltaEvent("end_turn", usageDetail))
+	if !send(kiroclaude.BuildClaudeContentBlockStopEvent(0)) {
+		return
+	}
+	for _, idx := range toolOrder {
+		if !send(kiroclaude.BuildClaudeContentBlockStopEvent(idx)) {
+			return
+		}
+	}
+	stopReason := "end_turn"
+	if len(toolOrder) > 0 {
+		stopReason = "tool_use"
+	}
+	_ = send(kiroclaude.BuildClaudeMessageDeltaEvent(stopReason, usageDetail))
 	if !send(kiroclaude.BuildClaudeMessageStopOnlyEvent()) {
 		return
 	}
@@ -506,30 +546,107 @@ func recordKiroRequest(ctx context.Context, cfg *config.Config, auth *cliproxyau
 	})
 }
 
-func readKiroEventPayload(reader *bufio.Reader) ([]byte, error) {
+// readKiroEventFrame reads a single AWS EventStream frame and returns the value of the
+// ":event-type" header alongside the JSON payload. The event type is required to detect
+// non-text frames such as toolUseEvent, which carry no text field and would otherwise be
+// silently dropped. When the stream is not in binary frame format, it falls back to reading
+// a single line with an empty event type.
+func readKiroEventFrame(reader *bufio.Reader) (string, []byte, error) {
 	prelude, err := reader.Peek(12)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	totalLength := binary.BigEndian.Uint32(prelude[0:4])
 	headersLength := binary.BigEndian.Uint32(prelude[4:8])
 	if totalLength < 16 || totalLength > 20<<20 || headersLength > totalLength-16 {
 		line, errLine := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			return bytes.TrimSpace(line), nil
+			return "", bytes.TrimSpace(line), nil
 		}
-		return nil, errLine
+		return "", nil, errLine
 	}
 	raw := make([]byte, totalLength)
 	if _, err := io.ReadFull(reader, raw); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	payloadStart := 12 + int(headersLength)
 	payloadEnd := int(totalLength) - 4
 	if payloadStart > payloadEnd {
-		return nil, fmt.Errorf("kiro event stream: invalid frame")
+		return "", nil, fmt.Errorf("kiro event stream: invalid frame")
 	}
-	return bytes.TrimSpace(raw[payloadStart:payloadEnd]), nil
+	eventType := parseKiroEventType(raw[12:payloadStart])
+	return eventType, bytes.TrimSpace(raw[payloadStart:payloadEnd]), nil
+}
+
+// parseKiroEventType extracts the ":event-type" header from an AWS EventStream header block.
+// Wire format per header: [nameLen 1B][name][valueType 1B], and for string values (type 7):
+// [valueLen 2B][value].
+func parseKiroEventType(headers []byte) string {
+	offset := 0
+	for offset < len(headers) {
+		nameLen := int(headers[offset])
+		offset++
+		if offset+nameLen > len(headers) {
+			break
+		}
+		name := string(headers[offset : offset+nameLen])
+		offset += nameLen
+		if offset >= len(headers) {
+			break
+		}
+		valueType := headers[offset]
+		offset++
+		if valueType != 7 {
+			break
+		}
+		if offset+2 > len(headers) {
+			break
+		}
+		valueLen := int(headers[offset])<<8 | int(headers[offset+1])
+		offset += 2
+		if offset+valueLen > len(headers) {
+			break
+		}
+		value := string(headers[offset : offset+valueLen])
+		offset += valueLen
+		if name == ":event-type" {
+			return value
+		}
+	}
+	return ""
+}
+
+// isKiroToolUseEvent reports whether a frame represents a tool call. It trusts the
+// ":event-type" header when present and otherwise falls back to detecting the toolUseId
+// field, since the line-based fallback path has no header.
+func isKiroToolUseEvent(eventType string, payload []byte) bool {
+	if eventType == "toolUseEvent" {
+		return true
+	}
+	if eventType != "" {
+		return false
+	}
+	return gjson.GetBytes(payload, "toolUseId").Exists() || gjson.GetBytes(payload, "toolUseEvent.toolUseId").Exists()
+}
+
+// extractKiroToolUse pulls the tool call identity and input fragment from a frame. The input
+// is returned verbatim (no trimming): Kiro may stream it as partial JSON string fragments that
+// must be concatenated downstream, or deliver a complete object that is forwarded as-is.
+func extractKiroToolUse(payload []byte) (id, name, input string) {
+	root := gjson.ParseBytes(payload)
+	if nested := root.Get("toolUseEvent"); nested.Exists() && nested.IsObject() {
+		root = nested
+	}
+	id = strings.TrimSpace(root.Get("toolUseId").String())
+	name = strings.TrimSpace(root.Get("name").String())
+	if in := root.Get("input"); in.Exists() {
+		if in.Type == gjson.String {
+			input = in.String()
+		} else {
+			input = in.Raw
+		}
+	}
+	return id, name, input
 }
 
 func parseKiroEventStreamPayloads(raw []byte) (string, []kiroclaude.KiroToolUse, usage.Detail, string) {
@@ -539,14 +656,37 @@ func parseKiroEventStreamPayloads(raw []byte) (string, []kiroclaude.KiroToolUse,
 	stopReason := "end_turn"
 	processedTools := map[string]bool{}
 	var toolUses []kiroclaude.KiroToolUse
+	nativeTools := map[string]*kiroToolAccumulator{}
+	var nativeOrder []string
 	for {
-		payload, err := readKiroEventPayload(reader)
+		eventType, payload, err := readKiroEventFrame(reader)
 		if err != nil {
 			if len(raw) > 0 && content.Len() == 0 && gjson.ValidBytes(raw) {
 				payload = raw
 			} else {
 				break
 			}
+		}
+		if isKiroToolUseEvent(eventType, payload) {
+			id, name, inputFragment := extractKiroToolUse(payload)
+			if id == "" {
+				id = fmt.Sprintf("call_%d", len(nativeOrder)+1)
+			}
+			acc, ok := nativeTools[id]
+			if !ok {
+				acc = &kiroToolAccumulator{}
+				nativeTools[id] = acc
+				nativeOrder = append(nativeOrder, id)
+			}
+			if name != "" {
+				acc.name = name
+			}
+			acc.input.WriteString(inputFragment)
+			stopReason = "tool_use"
+			if err != nil {
+				break
+			}
+			continue
 		}
 		text := extractKiroText(payload)
 		if text != "" {
@@ -567,14 +707,48 @@ func parseKiroEventStreamPayloads(raw []byte) (string, []kiroclaude.KiroToolUse,
 			break
 		}
 	}
+	for _, id := range nativeOrder {
+		acc := nativeTools[id]
+		toolUses = append(toolUses, kiroclaude.KiroToolUse{
+			ToolUseID: id,
+			Name:      acc.name,
+			Input:     parseKiroToolInput(acc.input.String()),
+		})
+	}
 	if detail.TotalTokens == 0 {
 		detail.TotalTokens = detail.InputTokens + detail.OutputTokens
 	}
 	return content.String(), toolUses, detail, stopReason
 }
 
+type kiroToolAccumulator struct {
+	name  string
+	input strings.Builder
+}
+
+// parseKiroToolInput converts an accumulated tool input JSON string into a map. A blank or
+// invalid fragment yields an empty object so the downstream Claude tool_use block stays valid.
+func parseKiroToolInput(raw string) map[string]interface{} {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return map[string]interface{}{}
+	}
+	if !gjson.Valid(raw) {
+		return map[string]interface{}{}
+	}
+	parsed, ok := gjson.Parse(raw).Value().(map[string]interface{})
+	if !ok {
+		return map[string]interface{}{}
+	}
+	return parsed
+}
+
+// extractKiroText returns the text content of a Kiro event without trimming.
+// Whitespace (leading/trailing spaces and newlines) is significant: each streaming
+// delta is concatenated verbatim, so trimming here would collapse spacing between
+// chunks and drop whitespace-only deltas, corrupting the rendered output.
 func extractKiroText(payload []byte) string {
-	return firstGJSON(payload,
+	paths := []string{
 		"content",
 		"text",
 		"delta",
@@ -582,7 +756,15 @@ func extractKiroText(payload []byte) string {
 		"assistantResponseEvent.delta",
 		"assistantResponseEvent.text",
 		"chunk.bytes",
-	)
+	}
+	for _, path := range paths {
+		if result := gjson.GetBytes(payload, path); result.Exists() {
+			if value := result.String(); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func extractKiroUsage(payload []byte) usage.Detail {
