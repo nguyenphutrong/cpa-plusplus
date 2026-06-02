@@ -55,8 +55,12 @@ func ConvertOpenAIResponsesRequestToOpenAIChatCompletions(modelName string, inpu
 		out, _ = sjson.SetRawBytes(out, "messages.-1", systemMessage)
 	}
 
-	// Convert input array to messages
-	if input := root.Get("input"); input.Exists() && input.IsArray() {
+	// Convert input to messages
+	if input := root.Get("input"); input.Exists() && input.Type == gjson.String {
+		message := []byte(`{"role":"user","content":""}`)
+		message, _ = sjson.SetBytes(message, "content", input.String())
+		out, _ = sjson.SetRawBytes(out, "messages.-1", message)
+	} else if input.Exists() && input.IsArray() {
 		inputItems := input.Array()
 		outputCallIDs := make(map[string]struct{})
 		for _, item := range inputItems {

@@ -14,6 +14,8 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	kiroclaude "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/claude"
+	kiroopenai "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/openai"
+	openairesponses "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/openai/responses"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
@@ -83,8 +85,7 @@ func (e *KiroExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("kiro")
-	body := sdktranslator.TranslateRequest(from, to, model, req.Payload, false)
-	body = prepareKiroPayload(body, model, profileARN)
+	body := buildKiroRequestPayload(from, model, req.Model, profileARN, req.Payload, false, opts.Headers, opts.Metadata)
 
 	for _, endpoint := range kiroEndpoints(auth, profileARN) {
 		kiroBody, errDo := e.doKiroRequest(ctx, auth, token, endpoint, body)
@@ -102,8 +103,10 @@ func (e *KiroExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 		}
 		reporter.EnsurePublished(ctx)
 		claudeBody := kiroclaude.BuildClaudeResponse(content, toolUses, model, detail, stopReason)
-		var param any
-		out := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, opts.OriginalRequest, body, claudeBody, &param)
+		out := translateKiroNonStreamResponse(ctx, to, from, req.Model, opts.OriginalRequest, body, claudeBody)
+		if opts.Alt == "responses/compact" {
+			out = finalizeCompactResponse(out)
+		}
 		return cliproxyexecutor.Response{Payload: out}, nil
 	}
 	if err == nil {
@@ -123,8 +126,7 @@ func (e *KiroExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("kiro")
-	body := sdktranslator.TranslateRequest(from, to, model, req.Payload, true)
-	body = prepareKiroPayload(body, model, profileARN)
+	body := buildKiroRequestPayload(from, model, req.Model, profileARN, req.Payload, true, opts.Headers, opts.Metadata)
 
 	var lastErr error
 	for _, endpoint := range kiroEndpoints(auth, profileARN) {
@@ -210,13 +212,40 @@ func (e *KiroExecutor) streamKiroResponse(ctx context.Context, httpResp *http.Re
 		reporter.EnsurePublished(ctx)
 	}()
 
+	// Kiro streams Claude-format SSE events internally. The registry only knows how to
+	// translate those into OpenAI Chat or Claude SSE; there is no direct openai-response
+	// transform. For openai-response clients we therefore chain Claude SSE -> OpenAI Chat
+	// SSE -> OpenAI Responses SSE so the client receives proper response.* events including
+	// the terminal response.completed.
+	isResponses := from == sdktranslator.FormatOpenAIResponse
+	requestForResponses := opts.OriginalRequest
+	if len(requestForResponses) == 0 {
+		requestForResponses = requestBody
+	}
+
 	var param any
+	var paramChat any
+	var paramResp any
+
+	emit := func(chunk []byte) bool {
+		select {
+		case out <- cliproxyexecutor.StreamChunk{Payload: chunk}:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
 	send := func(event []byte) bool {
 		helps.AppendAPIResponseChunk(ctx, e.cfg, event)
-		for _, chunk := range sdktranslator.TranslateStream(ctx, to, from, req.Model, opts.OriginalRequest, requestBody, event, &param) {
-			select {
-			case out <- cliproxyexecutor.StreamChunk{Payload: chunk}:
-			case <-ctx.Done():
+		var chunks [][]byte
+		if isResponses {
+			chunks = translateKiroStreamToResponses(ctx, req.Model, opts.OriginalRequest, requestForResponses, event, &paramChat, &paramResp)
+		} else {
+			chunks = sdktranslator.TranslateStream(ctx, to, from, req.Model, opts.OriginalRequest, requestBody, event, &param)
+		}
+		for _, chunk := range chunks {
+			if !emit(chunk) {
 				return false
 			}
 		}
@@ -263,7 +292,18 @@ func (e *KiroExecutor) streamKiroResponse(ctx context.Context, httpResp *http.Re
 	reporter.Publish(ctx, usageDetail)
 	_ = send(kiroclaude.BuildClaudeContentBlockStopEvent(0))
 	_ = send(kiroclaude.BuildClaudeMessageDeltaEvent("end_turn", usageDetail))
-	_ = send(kiroclaude.BuildClaudeMessageStopOnlyEvent())
+	if !send(kiroclaude.BuildClaudeMessageStopOnlyEvent()) {
+		return
+	}
+	// The OpenAI Responses stream translator emits response.completed only when it sees a
+	// [DONE] sentinel. Kiro never produces one, so feed it explicitly to flush the terminal event.
+	if isResponses {
+		for _, chunk := range openairesponses.ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx, req.Model, opts.OriginalRequest, requestForResponses, []byte("[DONE]"), &paramResp) {
+			if !emit(chunk) {
+				return
+			}
+		}
+	}
 }
 
 func kiroCredentials(auth *cliproxyauth.Auth) (accessToken, profileARN string) {
@@ -294,6 +334,71 @@ func metaStringAny(meta map[string]any, keys ...string) string {
 	return ""
 }
 
+func buildKiroRequestPayload(from sdktranslator.Format, model, requestedModel, profileARN string, payload []byte, stream bool, headers http.Header, metadata map[string]any) []byte {
+	isAgentic, isChatOnly := kiroModelVariantFlags(requestedModel)
+	switch from {
+	case sdktranslator.FormatOpenAIResponse:
+		openaiBody := openairesponses.ConvertOpenAIResponsesRequestToOpenAIChatCompletions(model, payload, stream)
+		body, _ := kiroopenai.BuildKiroPayloadFromOpenAI(openaiBody, model, profileARN, "AI_EDITOR", isAgentic, isChatOnly, headers, metadata)
+		return prepareKiroPayload(body, model, profileARN)
+	case sdktranslator.FormatOpenAI:
+		body, _ := kiroopenai.BuildKiroPayloadFromOpenAI(payload, model, profileARN, "AI_EDITOR", isAgentic, isChatOnly, headers, metadata)
+		return prepareKiroPayload(body, model, profileARN)
+	case sdktranslator.FormatClaude:
+		body, _ := kiroclaude.BuildKiroPayload(payload, model, profileARN, "AI_EDITOR", isAgentic, isChatOnly, headers, metadata)
+		return prepareKiroPayload(body, model, profileARN)
+	default:
+		to := sdktranslator.FromString("kiro")
+		body := sdktranslator.TranslateRequest(from, to, model, payload, stream)
+		return prepareKiroPayload(body, model, profileARN)
+	}
+}
+
+func translateKiroNonStreamResponse(ctx context.Context, upstream, client sdktranslator.Format, model string, originalRequest, requestBody, claudeBody []byte) []byte {
+	var param any
+	if client == sdktranslator.FormatOpenAIResponse {
+		openaiBody := sdktranslator.TranslateNonStream(ctx, upstream, sdktranslator.FormatOpenAI, model, originalRequest, requestBody, claudeBody, &param)
+		param = nil
+		requestForResponses := originalRequest
+		if len(requestForResponses) == 0 {
+			requestForResponses = requestBody
+		}
+		return openairesponses.ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(ctx, model, originalRequest, requestForResponses, openaiBody, &param)
+	}
+	return sdktranslator.TranslateNonStream(ctx, upstream, client, model, originalRequest, requestBody, claudeBody, &param)
+}
+
+// translateKiroStreamToResponses chains Kiro's Claude SSE -> OpenAI Chat SSE -> OpenAI Responses SSE.
+// paramChat and paramResp hold the independent streaming state for each stage and must persist
+// across the whole stream.
+func translateKiroStreamToResponses(ctx context.Context, model string, originalRequest, requestForResponses, event []byte, paramChat, paramResp *any) [][]byte {
+	chatChunks := kiroopenai.ConvertKiroStreamToOpenAI(ctx, model, originalRequest, requestForResponses, event, paramChat)
+	var out [][]byte
+	for _, chatChunk := range chatChunks {
+		out = append(out, openairesponses.ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx, model, originalRequest, requestForResponses, chatChunk, paramResp)...)
+	}
+	return out
+}
+
+func kiroModelVariantFlags(model string) (isAgentic, isChatOnly bool) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(model, "/"); idx >= 0 && idx < len(model)-1 {
+		model = strings.TrimSpace(model[idx+1:])
+	}
+	return strings.HasSuffix(model, "-agentic"), strings.HasSuffix(model, "-chat")
+}
+
+// finalizeCompactResponse adjusts the OpenAI Responses translation for /responses/compact.
+// The compact client expects {object:"response.compaction"} without output items, because
+// compaction is a housekeeping operation rather than a user-visible message.
+func finalizeCompactResponse(raw []byte) []byte {
+	raw, _ = sjson.SetBytes(raw, "object", "response.compaction")
+	raw, _ = sjson.DeleteBytes(raw, "output")
+	raw, _ = sjson.DeleteBytes(raw, "status")
+	raw, _ = sjson.DeleteBytes(raw, "incomplete_details")
+	return raw
+}
+
 func prepareKiroPayload(body []byte, model, profileARN string) []byte {
 	body, _ = sjson.SetBytes(body, "conversationState.currentMessage.userInputMessage.modelId", normalizeKiroModel(model))
 	if profileARN != "" {
@@ -306,6 +411,9 @@ func prepareKiroPayload(body []byte, model, profileARN string) []byte {
 
 func normalizeKiroModel(model string) string {
 	model = strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(model, "/"); idx >= 0 && idx < len(model)-1 {
+		model = strings.TrimSpace(model[idx+1:])
+	}
 	model = strings.TrimSuffix(model, "-agentic")
 	model = strings.TrimSuffix(model, "-chat")
 	replacer := strings.NewReplacer(
@@ -321,24 +429,15 @@ func normalizeKiroModel(model string) string {
 	if model == "" || model == "auto" {
 		return "auto"
 	}
-	if strings.Contains(model, "opus") {
-		if strings.Contains(model, "4.6") {
-			return "claude-opus-4.6"
-		}
+	switch model {
+	case "opus", "claude-opus":
 		return "claude-opus-4.5"
-	}
-	if strings.Contains(model, "haiku") {
+	case "haiku", "claude-haiku":
 		return "claude-haiku-4.5"
+	case "sonnet", "claude-sonnet":
+		return "claude-sonnet-4.5"
 	}
-	if strings.Contains(model, "sonnet") {
-		if strings.Contains(model, "4.6") {
-			return "claude-sonnet-4.6"
-		}
-		if strings.Contains(model, "4") {
-			return "claude-sonnet-4.5"
-		}
-	}
-	return "claude-sonnet-4.5"
+	return model
 }
 
 func kiroEndpoints(auth *cliproxyauth.Auth, profileARN string) []kiroEndpoint {
