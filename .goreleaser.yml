@@ -43,3 +43,23 @@ changelog:
     exclude:
       - '^docs:'
       - '^test:'
+
+brews:
+  - name: cpa-plusplus
+    repository:
+      owner: nguyenphutrong
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    description: "OpenAI/Gemini/Claude/Codex compatible API proxy with OAuth and round-robin load balancing"
+    homepage: "https://github.com/nguyenphutrong/cpa-plusplus"
+    license: "MIT"
+    install: |
+      bin.install "cpa-plusplus"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/cpa-plusplus --version")
+    skip_upload: false
+    dependencies:
+      - name: git
+        type: optional
