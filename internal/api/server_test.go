@@ -494,6 +494,7 @@ func TestModelsWithClientVersionReturnsCodexCatalog(t *testing.T) {
 		{ID: "gpt-image-2", Object: "model", OwnedBy: "openai", Type: "openai"},
 		{ID: "grok-imagine-image", Object: "model", OwnedBy: "xai", Type: "openai"},
 		{ID: "grok-imagine-video", Object: "model", OwnedBy: "xai", Type: "openai"},
+		{ID: "grok-imagine-video-1.5-preview", Object: "model", OwnedBy: "xai", Type: "openai"},
 	})
 	t.Cleanup(func() {
 		modelRegistry.UnregisterClient(clientID)
@@ -580,10 +581,11 @@ func TestModelsWithClientVersionReturnsCodexCatalog(t *testing.T) {
 	}
 
 	hiddenModels := map[string]bool{
-		"openai/grok-imagine-image-quality": false,
-		"openai/gpt-image-2":                false,
-		"openai/grok-imagine-image":         false,
-		"openai/grok-imagine-video":         false,
+		"openai/grok-imagine-image-quality":     false,
+		"openai/gpt-image-2":                    false,
+		"openai/grok-imagine-image":             false,
+		"openai/grok-imagine-video":             false,
+		"openai/grok-imagine-video-1.5-preview": false,
 	}
 	for _, model := range resp.Models {
 		slug, _ := model["slug"].(string)

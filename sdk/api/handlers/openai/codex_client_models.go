@@ -157,7 +157,7 @@ func applyCodexClientModelMetadata(entry map[string]any, id, lookupID, provider 
 
 func applyCodexClientVisibilityOverride(entry map[string]any, id string) {
 	switch strings.TrimSpace(id) {
-	case "grok-imagine-image-quality", "gpt-image-2", "grok-imagine-image", "grok-imagine-video":
+	case "grok-imagine-image-quality", "gpt-image-2", "grok-imagine-image", "grok-imagine-video", "grok-imagine-video-1.5-preview":
 		entry["visibility"] = "hide"
 	}
 }
