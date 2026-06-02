@@ -910,9 +910,9 @@ func extractKiroText(payload []byte) string {
 }
 
 func extractKiroUsage(payload []byte) usage.Detail {
-	input := firstGJSONInt(payload, "usage.input_tokens", "usage.inputTokens", "tokenUsage.inputTokens", "messageMetadataEvent.inputTokens", "inputTokens")
-	output := firstGJSONInt(payload, "usage.output_tokens", "usage.outputTokens", "tokenUsage.outputTokens", "messageMetadataEvent.outputTokens", "outputTokens")
-	total := firstGJSONInt(payload, "usage.total_tokens", "usage.totalTokens", "tokenUsage.totalTokens", "messageMetadataEvent.totalTokens", "totalTokens")
+	input := firstGJSONInt(payload, "usage.input_tokens", "usage.inputTokens", "tokenUsage.inputTokens", "messageMetadataEvent.inputTokens", "metricsEvent.inputTokens", "contextUsageEvent.inputTokens", "inputTokens")
+	output := firstGJSONInt(payload, "usage.output_tokens", "usage.outputTokens", "tokenUsage.outputTokens", "messageMetadataEvent.outputTokens", "metricsEvent.outputTokens", "contextUsageEvent.outputTokens", "outputTokens")
+	total := firstGJSONInt(payload, "usage.total_tokens", "usage.totalTokens", "tokenUsage.totalTokens", "messageMetadataEvent.totalTokens", "metricsEvent.totalTokens", "contextUsageEvent.totalTokens", "totalTokens")
 	if total == 0 {
 		total = input + output
 	}

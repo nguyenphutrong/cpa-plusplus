@@ -435,6 +435,71 @@ func TestKiroToolIndexMapSurvivesLeadingThinkingBlock(t *testing.T) {
 	}
 }
 
+func TestStreamKiroToolOnlyTurnEmitsNoTextBlock(t *testing.T) {
+	var raw []byte
+	raw = append(raw, buildKiroEventFrame("toolUseEvent", `{"toolUseId":"call_1","name":"get_weather","input":"{\"city\":\"Hanoi\"}"}`)...)
+	raw = append(raw, buildKiroEventFrame("messageStopEvent", `{}`)...)
+
+	var events []string
+	send := func(event []byte) bool {
+		events = append(events, string(event))
+		return true
+	}
+	reader := bufio.NewReader(bytes.NewReader(raw))
+	usageDetail, stopReason, ok := streamKiroClaudeEvents(reader, send, nil, nil, nil)
+	if !ok {
+		t.Fatalf("stream aborted")
+	}
+	if stopReason != "tool_use" {
+		t.Fatalf("stopReason = %q, want tool_use", stopReason)
+	}
+	_ = usageDetail
+	for _, e := range events {
+		if strings.Contains(e, "content_block_start") && strings.Contains(e, `"type":"text"`) {
+			t.Fatalf("unexpected empty text block emitted for tool-only turn: %s", e)
+		}
+	}
+	// The single tool block must start at index 0 since no text block precedes it.
+	foundToolAtZero := false
+	for _, e := range events {
+		if strings.Contains(e, "content_block_start") && strings.Contains(e, `"type":"tool_use"`) {
+			if strings.Contains(e, `"index":0`) {
+				foundToolAtZero = true
+			}
+		}
+	}
+	if !foundToolAtZero {
+		t.Fatalf("expected tool block at index 0, events: %v", events)
+	}
+}
+
+func TestStreamKiroUsageInputTokensPropagate(t *testing.T) {
+	var raw []byte
+	raw = append(raw, buildKiroEventFrame("assistantResponseEvent", `{"content":"hello"}`)...)
+	raw = append(raw, buildKiroEventFrame("metricsEvent", `{"inputTokens":42,"outputTokens":7,"totalTokens":49}`)...)
+	raw = append(raw, buildKiroEventFrame("messageStopEvent", `{}`)...)
+
+	send := func(event []byte) bool { return true }
+	reader := bufio.NewReader(bytes.NewReader(raw))
+	usageDetail, _, ok := streamKiroClaudeEvents(reader, send, nil, nil, nil)
+	if !ok {
+		t.Fatalf("stream aborted")
+	}
+	if usageDetail.InputTokens != 42 {
+		t.Fatalf("InputTokens = %d, want 42", usageDetail.InputTokens)
+	}
+	if usageDetail.TotalTokens < 42 {
+		t.Fatalf("TotalTokens = %d, want >= 42", usageDetail.TotalTokens)
+	}
+}
+
+func TestExtractKiroUsageReadsMetricsEvent(t *testing.T) {
+	detail := extractKiroUsage([]byte(`{"metricsEvent":{"inputTokens":11,"outputTokens":3,"totalTokens":14}}`))
+	if detail.InputTokens != 11 || detail.OutputTokens != 3 || detail.TotalTokens != 14 {
+		t.Fatalf("unexpected usage from metricsEvent: %+v", detail)
+	}
+}
+
 func TestFinalizeCompactResponse(t *testing.T) {
 	in := []byte(`{"id":"resp_1","object":"response","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"created_at":1234567890}`)
 
