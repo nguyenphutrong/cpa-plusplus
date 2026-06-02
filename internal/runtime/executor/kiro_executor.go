@@ -14,6 +14,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	kiroclaude "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/claude"
+	kirocommon "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/common"
 	kiroopenai "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/kiro/openai"
 	openairesponses "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/openai/responses"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
@@ -255,82 +256,26 @@ func (e *KiroExecutor) streamKiroResponse(ctx context.Context, httpResp *http.Re
 	if !send(kiroclaude.BuildClaudeMessageStartEvent(req.Model, 0)) {
 		return
 	}
-	if !send(kiroclaude.BuildClaudeContentBlockStartEvent(0, "text", "", "")) {
-		return
-	}
 
 	reader := bufio.NewReaderSize(httpResp.Body, kiroScannerMaxSize)
-	var outputTokens int64
-	// Kiro delivers tool calls as native toolUseEvent frames. Text stays at content
-	// block index 0; each distinct tool call gets its own block starting at index 1,
-	// which the downstream ConvertKiroStreamToOpenAI translator expects (it derives the
-	// OpenAI tool index from blockIndex-1).
-	toolBlocks := map[string]int{}
-	var toolOrder []int
-	nextToolIndex := 1
-	for {
-		eventType, payload, err := readKiroEventFrame(reader)
-		if err != nil {
-			if err != io.EOF {
-				helps.RecordAPIResponseError(ctx, e.cfg, err)
-				reporter.PublishFailure(ctx, err)
-				select {
-				case out <- cliproxyexecutor.StreamChunk{Err: err}:
-				case <-ctx.Done():
-				}
+	usageDetail, stopReason, ok := streamKiroClaudeEvents(
+		reader,
+		send,
+		func(p []byte) { helps.AppendAPIResponseChunk(ctx, e.cfg, p) },
+		func(d usage.Detail) { reporter.Publish(ctx, d) },
+		func(errFrame error) {
+			helps.RecordAPIResponseError(ctx, e.cfg, errFrame)
+			reporter.PublishFailure(ctx, errFrame)
+			select {
+			case out <- cliproxyexecutor.StreamChunk{Err: errFrame}:
+			case <-ctx.Done():
 			}
-			break
-		}
-		helps.AppendAPIResponseChunk(ctx, e.cfg, payload)
-		if isKiroToolUseEvent(eventType, payload) {
-			id, name, inputFragment := extractKiroToolUse(payload)
-			if id == "" {
-				id = fmt.Sprintf("call_%d", nextToolIndex)
-			}
-			idx, seen := toolBlocks[id]
-			if !seen {
-				idx = nextToolIndex
-				nextToolIndex++
-				toolBlocks[id] = idx
-				toolOrder = append(toolOrder, idx)
-				if !send(kiroclaude.BuildClaudeContentBlockStartEvent(idx, "tool_use", id, name)) {
-					return
-				}
-			}
-			if inputFragment != "" {
-				if !send(kiroclaude.BuildClaudeInputJsonDeltaEvent(inputFragment, idx)) {
-					return
-				}
-			}
-			continue
-		}
-		text := extractKiroText(payload)
-		if text == "" {
-			if detail := extractKiroUsage(payload); detail.TotalTokens > 0 {
-				reporter.Publish(ctx, detail)
-				outputTokens = detail.OutputTokens
-			}
-			continue
-		}
-		outputTokens += int64(len(text) / 4)
-		if !send(kiroclaude.BuildClaudeStreamEvent(text, 0)) {
-			return
-		}
-	}
-	usageDetail := usage.Detail{OutputTokens: outputTokens, TotalTokens: outputTokens}
-	reporter.Publish(ctx, usageDetail)
-	if !send(kiroclaude.BuildClaudeContentBlockStopEvent(0)) {
+		},
+	)
+	if !ok {
 		return
 	}
-	for _, idx := range toolOrder {
-		if !send(kiroclaude.BuildClaudeContentBlockStopEvent(idx)) {
-			return
-		}
-	}
-	stopReason := "end_turn"
-	if len(toolOrder) > 0 {
-		stopReason = "tool_use"
-	}
+	reporter.Publish(ctx, usageDetail)
 	_ = send(kiroclaude.BuildClaudeMessageDeltaEvent(stopReason, usageDetail))
 	if !send(kiroclaude.BuildClaudeMessageStopOnlyEvent()) {
 		return
@@ -649,9 +594,193 @@ func extractKiroToolUse(payload []byte) (id, name, input string) {
 	return id, name, input
 }
 
+// isKiroReasoningEvent reports whether a frame carries official reasoning content. Kiro emits
+// reasoningContentEvent (rather than inline <thinking> tags) when thinking mode is enabled.
+func isKiroReasoningEvent(eventType string) bool {
+	return eventType == "reasoningContentEvent"
+}
+
+// extractKiroReasoning pulls reasoning text from a reasoningContentEvent, verbatim, whether the
+// payload is flat or nested under reasoningContentEvent.
+func extractKiroReasoning(payload []byte) string {
+	root := gjson.ParseBytes(payload)
+	if nested := root.Get("reasoningContentEvent"); nested.Exists() && nested.IsObject() {
+		root = nested
+	}
+	for _, path := range []string{"text", "content"} {
+		if r := root.Get(path); r.Exists() {
+			if v := r.String(); v != "" {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+type kiroBlockType int
+
+const (
+	kiroBlockNone kiroBlockType = iota
+	kiroBlockThinking
+	kiroBlockText
+	kiroBlockTool
+)
+
+// kiroBlockTracker opens Claude content blocks lazily and in order, closing the previously open
+// block before a different one starts. This avoids empty blocks and keeps tool block indices
+// contiguous so the translator can map them to OpenAI tool indices.
+type kiroBlockTracker struct {
+	next       int
+	openIndex  int
+	openType   kiroBlockType
+	openToolID string
+	tools      int
+}
+
+func newKiroBlockTracker() *kiroBlockTracker {
+	return &kiroBlockTracker{openIndex: -1, openType: kiroBlockNone}
+}
+
+func (b *kiroBlockTracker) toolCount() int { return b.tools }
+
+// ensure makes the block of the given type (and tool id, for tools) the current open block.
+// It returns the block index to use, an optional content_block_stop event for a different block
+// that had to be closed first (nil if none), and whether the requested block was already open.
+func (b *kiroBlockTracker) ensure(blockType kiroBlockType, toolID string) (int, []byte, bool) {
+	if b.openType == blockType && (blockType != kiroBlockTool || b.openToolID == toolID) {
+		return b.openIndex, nil, true
+	}
+	var stop []byte
+	if b.openIndex >= 0 {
+		stop = kiroclaude.BuildClaudeContentBlockStopEvent(b.openIndex)
+	}
+	idx := b.next
+	b.next++
+	b.openIndex = idx
+	b.openType = blockType
+	b.openToolID = toolID
+	if blockType == kiroBlockTool {
+		b.tools++
+	}
+	return idx, stop, false
+}
+
+// closeOpen returns the content_block_stop event for the currently open block, if any.
+func (b *kiroBlockTracker) closeOpen() []byte {
+	if b.openIndex < 0 {
+		return nil
+	}
+	stop := kiroclaude.BuildClaudeContentBlockStopEvent(b.openIndex)
+	b.openIndex = -1
+	b.openType = kiroBlockNone
+	b.openToolID = ""
+	return stop
+}
+
+// streamKiroClaudeEvents reads Kiro AWS EventStream frames and emits Claude-format SSE events
+// (content blocks for reasoning, text, and tool calls) via send. It returns the aggregated usage,
+// the resolved stop reason, and whether streaming completed (false means send aborted, e.g. the
+// client disconnected). record, publish, and fail are optional hooks for response capture, usage
+// reporting, and frame-read errors respectively. The loop here is decoupled from HTTP so it can be
+// unit-tested end to end.
+func streamKiroClaudeEvents(reader *bufio.Reader, send func([]byte) bool, record func([]byte), publish func(usage.Detail), fail func(error)) (usage.Detail, string, bool) {
+	blocks := newKiroBlockTracker()
+	var outputTokens, inputTokens int64
+	hasToolCalls := false
+	for {
+		eventType, payload, err := readKiroEventFrame(reader)
+		if err != nil {
+			if err != io.EOF && fail != nil {
+				fail(err)
+			}
+			break
+		}
+		if record != nil {
+			record(payload)
+		}
+
+		if isKiroReasoningEvent(eventType) {
+			reasoning := extractKiroReasoning(payload)
+			if reasoning == "" {
+				continue
+			}
+			idx, stop, open := blocks.ensure(kiroBlockThinking, "")
+			if stop != nil && !send(stop) {
+				return usage.Detail{}, "", false
+			}
+			if !open && !send(kiroclaude.BuildClaudeContentBlockStartEvent(idx, "thinking", "", "")) {
+				return usage.Detail{}, "", false
+			}
+			outputTokens += int64(len(reasoning) / 4)
+			if !send(kiroclaude.BuildClaudeThinkingDeltaEvent(reasoning, idx)) {
+				return usage.Detail{}, "", false
+			}
+			continue
+		}
+
+		if isKiroToolUseEvent(eventType, payload) {
+			id, name, inputFragment := extractKiroToolUse(payload)
+			if id == "" {
+				if blocks.openType == kiroBlockTool && blocks.openToolID != "" {
+					id = blocks.openToolID
+				} else {
+					id = fmt.Sprintf("call_%d", blocks.toolCount()+1)
+				}
+			}
+			idx, stop, open := blocks.ensure(kiroBlockTool, id)
+			if stop != nil && !send(stop) {
+				return usage.Detail{}, "", false
+			}
+			if !open && !send(kiroclaude.BuildClaudeContentBlockStartEvent(idx, "tool_use", id, name)) {
+				return usage.Detail{}, "", false
+			}
+			hasToolCalls = true
+			if inputFragment != "" && !send(kiroclaude.BuildClaudeInputJsonDeltaEvent(inputFragment, idx)) {
+				return usage.Detail{}, "", false
+			}
+			continue
+		}
+
+		text := extractKiroText(payload)
+		if text == "" {
+			if detail := extractKiroUsage(payload); detail.TotalTokens > 0 {
+				if publish != nil {
+					publish(detail)
+				}
+				outputTokens = detail.OutputTokens
+				if detail.InputTokens > 0 {
+					inputTokens = detail.InputTokens
+				}
+			}
+			continue
+		}
+		idx, stop, open := blocks.ensure(kiroBlockText, "")
+		if stop != nil && !send(stop) {
+			return usage.Detail{}, "", false
+		}
+		if !open && !send(kiroclaude.BuildClaudeContentBlockStartEvent(idx, "text", "", "")) {
+			return usage.Detail{}, "", false
+		}
+		outputTokens += int64(len(text) / 4)
+		if !send(kiroclaude.BuildClaudeStreamEvent(text, idx)) {
+			return usage.Detail{}, "", false
+		}
+	}
+	if stop := blocks.closeOpen(); stop != nil && !send(stop) {
+		return usage.Detail{}, "", false
+	}
+	usageDetail := usage.Detail{InputTokens: inputTokens, OutputTokens: outputTokens, TotalTokens: inputTokens + outputTokens}
+	stopReason := "end_turn"
+	if hasToolCalls {
+		stopReason = "tool_use"
+	}
+	return usageDetail, stopReason, true
+}
+
 func parseKiroEventStreamPayloads(raw []byte) (string, []kiroclaude.KiroToolUse, usage.Detail, string) {
 	reader := bufio.NewReader(bytes.NewReader(raw))
 	var content strings.Builder
+	var reasoning strings.Builder
 	var detail usage.Detail
 	stopReason := "end_turn"
 	processedTools := map[string]bool{}
@@ -666,6 +795,13 @@ func parseKiroEventStreamPayloads(raw []byte) (string, []kiroclaude.KiroToolUse,
 			} else {
 				break
 			}
+		}
+		if isKiroReasoningEvent(eventType) {
+			reasoning.WriteString(extractKiroReasoning(payload))
+			if err != nil {
+				break
+			}
+			continue
 		}
 		if isKiroToolUseEvent(eventType, payload) {
 			id, name, inputFragment := extractKiroToolUse(payload)
@@ -718,7 +854,13 @@ func parseKiroEventStreamPayloads(raw []byte) (string, []kiroclaude.KiroToolUse,
 	if detail.TotalTokens == 0 {
 		detail.TotalTokens = detail.InputTokens + detail.OutputTokens
 	}
-	return content.String(), toolUses, detail, stopReason
+	finalContent := content.String()
+	if reasoning.Len() > 0 {
+		// Wrap official reasoning in <thinking> tags so BuildClaudeResponse emits a Claude
+		// thinking block instead of leaking the reasoning into the visible answer text.
+		finalContent = kirocommon.ThinkingStartTag + reasoning.String() + kirocommon.ThinkingEndTag + finalContent
+	}
+	return finalContent, toolUses, detail, stopReason
 }
 
 type kiroToolAccumulator struct {

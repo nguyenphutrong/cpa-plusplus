@@ -299,6 +299,142 @@ func TestStreamKiroToolUseProducesFunctionCall(t *testing.T) {
 	}
 }
 
+// runKiroStreamThroughResponses drives the real executor stream loop (streamKiroClaudeEvents)
+// over raw Kiro frames and pipes the emitted Claude SSE through the OpenAI Responses chain,
+// returning the concatenated Responses SSE output.
+func runKiroStreamThroughResponses(t *testing.T, ctx context.Context, model string, original, raw []byte) string {
+	t.Helper()
+	var paramChat any
+	var paramResp any
+	var all []byte
+	send := func(event []byte) bool {
+		for _, chunk := range translateKiroStreamToResponses(ctx, model, original, original, event, &paramChat, &paramResp) {
+			all = append(all, chunk...)
+		}
+		return true
+	}
+	send(kiroclaude.BuildClaudeMessageStartEvent(model, 0))
+	reader := bufio.NewReader(bytes.NewReader(raw))
+	usageDetail, stopReason, ok := streamKiroClaudeEvents(reader, send, nil, nil, nil)
+	if !ok {
+		t.Fatalf("stream aborted unexpectedly")
+	}
+	send(kiroclaude.BuildClaudeMessageDeltaEvent(stopReason, usageDetail))
+	send(kiroclaude.BuildClaudeMessageStopOnlyEvent())
+	for _, chunk := range openairesponses.ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx, model, original, original, []byte("[DONE]"), &paramResp) {
+		all = append(all, chunk...)
+	}
+	return string(all)
+}
+
+func TestExtractKiroReasoning(t *testing.T) {
+	cases := map[string]string{
+		`{"text":"step 1 "}`:                        "step 1 ",
+		`{"content":"thinking..."}`:                 "thinking...",
+		`{"reasoningContentEvent":{"text":"deep"}}`: "deep",
+		`{"reasoningContentEvent":{"content":"x"}}`: "x",
+		`{"foo":"bar"}`:                             "",
+	}
+	for payload, want := range cases {
+		if got := extractKiroReasoning([]byte(payload)); got != want {
+			t.Fatalf("extractKiroReasoning(%s) = %q, want %q", payload, got, want)
+		}
+	}
+	if !isKiroReasoningEvent("reasoningContentEvent") {
+		t.Fatalf("expected reasoningContentEvent to be detected")
+	}
+	if isKiroReasoningEvent("assistantResponseEvent") {
+		t.Fatalf("assistantResponseEvent must not be a reasoning event")
+	}
+}
+
+func TestStreamKiroReasoningThenTextAndTool(t *testing.T) {
+	ctx := context.Background()
+	model := "claude-sonnet-4.5"
+	original := []byte(`{"model":"claude-sonnet-4.5","input":"weather?","stream":true,"reasoning":{"effort":"low"}}`)
+
+	var raw []byte
+	raw = append(raw, buildKiroEventFrame("reasoningContentEvent", `{"text":"Let me think. "}`)...)
+	raw = append(raw, buildKiroEventFrame("reasoningContentEvent", `{"text":"Need weather."}`)...)
+	raw = append(raw, buildKiroEventFrame("assistantResponseEvent", `{"content":"Checking now. "}`)...)
+	raw = append(raw, buildKiroEventFrame("toolUseEvent", `{"toolUseId":"call_1","name":"get_weather","input":"{\"city\":\"Hanoi\"}"}`)...)
+	raw = append(raw, buildKiroEventFrame("messageStopEvent", `{}`)...)
+
+	// Drive the same Claude-event pipeline the executor uses, then translate to Responses.
+	all := runKiroStreamThroughResponses(t, ctx, model, original, raw)
+
+	if !strings.Contains(all, "response.reasoning_summary_text.delta") {
+		t.Fatalf("expected reasoning delta event, got: %s", all)
+	}
+	if !strings.Contains(all, "Let me think. Need weather.") {
+		t.Fatalf("expected concatenated reasoning text, got: %s", all)
+	}
+	if !strings.Contains(all, "response.output_text.delta") || !strings.Contains(all, "Checking now. ") {
+		t.Fatalf("expected text delta, got: %s", all)
+	}
+	if !strings.Contains(all, "get_weather") || !strings.Contains(all, "Hanoi") {
+		t.Fatalf("expected tool call with args, got: %s", all)
+	}
+	if !strings.Contains(all, "response.completed") {
+		t.Fatalf("expected response.completed, got: %s", all)
+	}
+}
+
+func TestParseKiroEventStreamPayloadsReasoningBecomesThinking(t *testing.T) {
+	var raw []byte
+	raw = append(raw, buildKiroEventFrame("reasoningContentEvent", `{"text":"reasoning here"}`)...)
+	raw = append(raw, buildKiroEventFrame("assistantResponseEvent", `{"content":"final answer"}`)...)
+	raw = append(raw, buildKiroEventFrame("messageStopEvent", `{}`)...)
+
+	content, _, _, _ := parseKiroEventStreamPayloads(raw)
+	if !strings.HasPrefix(content, "<thinking>reasoning here</thinking>") {
+		t.Fatalf("reasoning not wrapped as thinking block: %q", content)
+	}
+	if !strings.Contains(content, "final answer") {
+		t.Fatalf("answer text missing: %q", content)
+	}
+}
+
+func TestKiroToolIndexMapSurvivesLeadingThinkingBlock(t *testing.T) {
+	ctx := context.Background()
+	model := "claude-sonnet-4.5"
+	original := []byte(`{"model":"claude-sonnet-4.5","input":"x","stream":true}`)
+
+	// thinking at block 0, text at block 1, two tool blocks at 2 and 3.
+	var paramChat any
+	var paramResp any
+	var all []byte
+	collect := func(event []byte) {
+		for _, chunk := range translateKiroStreamToResponses(ctx, model, original, original, event, &paramChat, &paramResp) {
+			all = append(all, chunk...)
+		}
+	}
+	collect(kiroclaude.BuildClaudeMessageStartEvent(model, 0))
+	collect(kiroclaude.BuildClaudeContentBlockStartEvent(0, "thinking", "", ""))
+	collect(kiroclaude.BuildClaudeThinkingDeltaEvent("reason", 0))
+	collect(kiroclaude.BuildClaudeContentBlockStopEvent(0))
+	collect(kiroclaude.BuildClaudeContentBlockStartEvent(2, "tool_use", "call_a", "alpha"))
+	collect(kiroclaude.BuildClaudeInputJsonDeltaEvent(`{"a":1}`, 2))
+	collect(kiroclaude.BuildClaudeContentBlockStopEvent(2))
+	collect(kiroclaude.BuildClaudeContentBlockStartEvent(3, "tool_use", "call_b", "beta"))
+	collect(kiroclaude.BuildClaudeInputJsonDeltaEvent(`{"b":2}`, 3))
+	collect(kiroclaude.BuildClaudeContentBlockStopEvent(3))
+	collect(kiroclaude.BuildClaudeMessageDeltaEvent("tool_use", usage.Detail{OutputTokens: 1, TotalTokens: 1}))
+	collect(kiroclaude.BuildClaudeMessageStopOnlyEvent())
+	for _, chunk := range openairesponses.ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx, model, original, original, []byte("[DONE]"), &paramResp) {
+		all = append(all, chunk...)
+	}
+
+	got := string(all)
+	// SSE payloads JSON-escape the argument quotes, so match the escaped forms.
+	if !strings.Contains(got, `{\"a\":1}`) || !strings.Contains(got, "alpha") {
+		t.Fatalf("first tool args/name missing: %s", got)
+	}
+	if !strings.Contains(got, `{\"b\":2}`) || !strings.Contains(got, "beta") {
+		t.Fatalf("second tool args/name missing (index mapping likely broken): %s", got)
+	}
+}
+
 func TestFinalizeCompactResponse(t *testing.T) {
 	in := []byte(`{"id":"resp_1","object":"response","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"created_at":1234567890}`)
 

@@ -19,6 +19,10 @@ type OpenAIStreamState struct {
 	Model             string
 	ResponseID        string
 	Created           int64
+	// ToolBlockToIndex maps a Claude content-block index to the OpenAI tool_calls index.
+	// It decouples tool indexing from the block layout so a leading thinking block (or any
+	// other reordering) does not corrupt tool arguments routing.
+	ToolBlockToIndex map[int]int
 }
 
 // NewOpenAIStreamState creates a new stream state for tracking
@@ -30,6 +34,7 @@ func NewOpenAIStreamState(model string) *OpenAIStreamState {
 		Model:             model,
 		ResponseID:        "chatcmpl-" + uuid.New().String()[:24],
 		Created:           time.Now().Unix(),
+		ToolBlockToIndex:  make(map[int]int),
 	}
 }
 
