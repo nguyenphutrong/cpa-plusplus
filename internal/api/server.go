@@ -820,6 +820,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.POST("/providers/oauth/callback", s.mgmt.PostProviderOAuthCallback)
 		mgmt.GET("/providers/oauth/sessions/:sessionID", s.mgmt.GetProviderOAuthSession)
 		mgmt.DELETE("/providers/oauth/sessions/:sessionID", s.mgmt.DeleteProviderOAuthSession)
+		mgmt.POST("/providers/antigravity/active-account", s.mgmt.PostAntigravityActiveAccount)
 		mgmt.GET("/providers", s.mgmt.ListProviders)
 		mgmt.GET("/providers/:id/enabled-models", s.mgmt.GetProviderEnabledModels)
 		mgmt.PUT("/providers/:id/enabled-models", s.mgmt.PutProviderEnabledModels)
