@@ -36,7 +36,21 @@ jobs:
           args: release --clean --skip=validate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
           VERSION: ${{ env.VERSION }}
           COMMIT: ${{ env.COMMIT }}
           BUILD_DATE: ${{ env.BUILD_DATE }}
+      - name: Trigger homebrew-tap update
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o /tmp/homebrew-dispatch-response.json \
+            -X POST \
+            -H "Authorization: token ${{ secrets.TAP_GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/nguyenphutrong/homebrew-tap/dispatches \
+            -d "{\"event_type\":\"cpa-plusplus-release\",\"client_payload\":{\"version\":\"${VERSION}\"}}")
+
+          if [ "$HTTP_CODE" != "204" ]; then
+            cat /tmp/homebrew-dispatch-response.json
+            echo "::error::Failed to trigger homebrew-tap update. HTTP status: $HTTP_CODE"
+            exit 1
+          fi
