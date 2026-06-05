@@ -20,7 +20,6 @@ on:
 
 permissions:
   contents: write
-  issues: write
   pull-requests: write
 
 concurrency:
@@ -91,56 +90,23 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Open or update conflict issue
+      - name: Write conflict summary
         if: steps.drift.outputs.behind != '0' && steps.merge.outcome == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { owner, repo } = context.repo;
-            const target = process.env.TARGET_BRANCH;
-            const upstreamRepo = process.env.UPSTREAM_REPOSITORY;
-            const upstreamBranch = process.env.UPSTREAM_BRANCH;
-            const conflictFiles = `${{ steps.conflicts.outputs.files }}`.trim() || '(none reported)';
-            const title = `Upstream sync conflict: ${target}`;
-            const body = [
-              `Automated upstream sync could not merge \`${upstreamRepo}:${upstreamBranch}\` into \`${target}\`.`,
-              '',
-              `Fork drift: ${{ steps.drift.outputs.behind }} commit(s) behind, ${{ steps.drift.outputs.ahead }} commit(s) ahead.`,
-              '',
-              'Conflicting files:',
-              '```',
-              conflictFiles,
-              '```',
-              '',
-              'Please resolve the conflicts manually, then rerun the `upstream-sync` workflow.'
-            ].join('\n');
-
-            try {
-              await github.rest.issues.createLabel({
-                owner,
-                repo,
-                name: process.env.SYNC_LABEL,
-                color: '0366d6',
-                description: 'Automated upstream synchronization',
-              });
-            } catch (error) {
-              if (error.status !== 422) throw error;
-            }
-
-            const existing = await github.rest.issues.listForRepo({
-              owner,
-              repo,
-              state: 'open',
-              labels: process.env.SYNC_LABEL,
-              per_page: 100,
-            });
-            const issue = existing.data.find(item => item.title === title && !item.pull_request);
-
-            if (issue) {
-              await github.rest.issues.createComment({ owner, repo, issue_number: issue.number, body });
-            } else {
-              await github.rest.issues.create({ owner, repo, title, body, labels: [process.env.SYNC_LABEL] });
-            }
+        run: |
+          {
+            echo "## Upstream sync conflict"
+            echo
+            echo "Automated upstream sync could not merge \`${UPSTREAM_REPOSITORY}:${UPSTREAM_BRANCH}\` into \`${TARGET_BRANCH}\`."
+            echo
+            echo "Fork drift: ${{ steps.drift.outputs.behind }} commit(s) behind, ${{ steps.drift.outputs.ahead }} commit(s) ahead."
+            echo
+            echo "Conflicting files:"
+            echo '```'
+            cat /tmp/upstream-conflicts.txt
+            echo '```'
+            echo
+            echo "Please resolve the conflicts manually, then rerun this workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail on merge conflicts
         if: steps.drift.outputs.behind != '0' && steps.merge.outcome == 'failure'
