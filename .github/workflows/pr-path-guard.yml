@@ -9,6 +9,7 @@ on:
 
 jobs:
   ensure-no-translator-changes:
+    if: ${{ !startsWith(github.head_ref, 'upstream-sync/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

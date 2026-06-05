@@ -1,0 +1,225 @@
+name: upstream-sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_repository:
+        description: Upstream repository in owner/name format
+        required: false
+        default: router-for-me/CLIProxyAPI
+      upstream_branch:
+        description: Upstream branch to merge
+        required: false
+        default: main
+      target_branch:
+        description: Fork branch to update
+        required: false
+        default: main
+  schedule:
+    - cron: "0 2 * * 1"
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync-${{ github.event.inputs.target_branch || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_REPOSITORY: ${{ github.event.inputs.upstream_repository || 'router-for-me/CLIProxyAPI' }}
+      UPSTREAM_BRANCH: ${{ github.event.inputs.upstream_branch || 'main' }}
+      TARGET_BRANCH: ${{ github.event.inputs.target_branch || 'main' }}
+      SYNC_LABEL: upstream-sync
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.target_branch || 'main' }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch --prune origin "${TARGET_BRANCH}"
+          git fetch --prune upstream "${UPSTREAM_BRANCH}"
+
+      - name: Calculate upstream drift
+        id: drift
+        run: |
+          behind=$(git rev-list --count "HEAD..upstream/${UPSTREAM_BRANCH}")
+          ahead=$(git rev-list --count "upstream/${UPSTREAM_BRANCH}..HEAD")
+          echo "behind=${behind}" >> "$GITHUB_OUTPUT"
+          echo "ahead=${ahead}" >> "$GITHUB_OUTPUT"
+          echo "Fork is ${behind} commit(s) behind and ${ahead} commit(s) ahead of upstream/${UPSTREAM_BRANCH}."
+
+      - name: Stop when already up to date
+        if: steps.drift.outputs.behind == '0'
+        run: echo "${TARGET_BRANCH} already contains upstream/${UPSTREAM_BRANCH}."
+
+      - name: Prepare sync branch
+        if: steps.drift.outputs.behind != '0'
+        run: |
+          sync_branch="upstream-sync/${TARGET_BRANCH}"
+          echo "SYNC_BRANCH=${sync_branch}" >> "$GITHUB_ENV"
+          git checkout -B "${sync_branch}"
+
+      - name: Merge upstream
+        if: steps.drift.outputs.behind != '0'
+        id: merge
+        continue-on-error: true
+        run: |
+          git merge --no-edit "upstream/${UPSTREAM_BRANCH}"
+
+      - name: Collect conflict details
+        if: steps.drift.outputs.behind != '0' && steps.merge.outcome == 'failure'
+        id: conflicts
+        run: |
+          git diff --name-only --diff-filter=U | tee /tmp/upstream-conflicts.txt
+          {
+            echo "files<<EOF"
+            cat /tmp/upstream-conflicts.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update conflict issue
+        if: steps.drift.outputs.behind != '0' && steps.merge.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const target = process.env.TARGET_BRANCH;
+            const upstreamRepo = process.env.UPSTREAM_REPOSITORY;
+            const upstreamBranch = process.env.UPSTREAM_BRANCH;
+            const conflictFiles = `${{ steps.conflicts.outputs.files }}`.trim() || '(none reported)';
+            const title = `Upstream sync conflict: ${target}`;
+            const body = [
+              `Automated upstream sync could not merge \`${upstreamRepo}:${upstreamBranch}\` into \`${target}\`.`,
+              '',
+              `Fork drift: ${{ steps.drift.outputs.behind }} commit(s) behind, ${{ steps.drift.outputs.ahead }} commit(s) ahead.`,
+              '',
+              'Conflicting files:',
+              '```',
+              conflictFiles,
+              '```',
+              '',
+              'Please resolve the conflicts manually, then rerun the `upstream-sync` workflow.'
+            ].join('\n');
+
+            try {
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: process.env.SYNC_LABEL,
+                color: '0366d6',
+                description: 'Automated upstream synchronization',
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error;
+            }
+
+            const existing = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              labels: process.env.SYNC_LABEL,
+              per_page: 100,
+            });
+            const issue = existing.data.find(item => item.title === title && !item.pull_request);
+
+            if (issue) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: issue.number, body });
+            } else {
+              await github.rest.issues.create({ owner, repo, title, body, labels: [process.env.SYNC_LABEL] });
+            }
+
+      - name: Fail on merge conflicts
+        if: steps.drift.outputs.behind != '0' && steps.merge.outcome == 'failure'
+        run: exit 1
+
+      - name: Set up Go
+        if: steps.drift.outputs.behind != '0'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Apply gofmt after merge
+        if: steps.drift.outputs.behind != '0'
+        run: |
+          gofmt -w .
+          if ! git diff --quiet; then
+            git add .
+            git commit -m "Apply gofmt after upstream sync"
+          fi
+
+      - name: Refresh models catalog for validation
+        if: steps.drift.outputs.behind != '0'
+        run: |
+          git fetch --depth 1 https://github.com/router-for-me/models.git main
+          git show FETCH_HEAD:models.json > internal/registry/models/models.json
+
+      - name: Build
+        if: steps.drift.outputs.behind != '0'
+        run: |
+          go build -o test-output ./cmd/server
+          rm -f test-output
+
+      - name: Test
+        if: steps.drift.outputs.behind != '0'
+        run: go test ./...
+
+      - name: Push sync branch
+        if: steps.drift.outputs.behind != '0'
+        run: git push --force-with-lease origin "${SYNC_BRANCH}"
+
+      - name: Open or update sync pull request
+        if: steps.drift.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create "${SYNC_LABEL}" \
+            --color 0366d6 \
+            --description "Automated upstream synchronization" || true
+
+          cat > /tmp/upstream-sync-pr.md <<EOF
+          This PR was created automatically by the \`upstream-sync\` workflow.
+
+          ## Upstream sync
+
+          - Upstream: \`${UPSTREAM_REPOSITORY}:${UPSTREAM_BRANCH}\`
+          - Target: \`${TARGET_BRANCH}\`
+          - Fork drift before sync: ${{ steps.drift.outputs.behind }} commit(s) behind, ${{ steps.drift.outputs.ahead }} commit(s) ahead
+
+          ## Validation run by workflow
+
+          - \`gofmt -w .\`
+          - \`go build -o test-output ./cmd/server && rm -f test-output\`
+          - \`go test ./...\`
+
+          ## Review checklist
+
+          - [ ] Review conflict-prone areas such as \`internal/api\`, \`internal/runtime/executor\`, \`internal/translator\`, \`internal/thinking\`, and config files
+          - [ ] Verify fork-specific behavior still works
+          EOF
+
+          existing_pr=$(gh pr list --head "${SYNC_BRANCH}" --base "${TARGET_BRANCH}" --state open --json number --jq '.[0].number')
+          if [ -n "${existing_pr}" ]; then
+            gh pr edit "${existing_pr}" --title "Sync upstream/${UPSTREAM_BRANCH} into ${TARGET_BRANCH}" --body-file /tmp/upstream-sync-pr.md --add-label "${SYNC_LABEL}"
+          else
+            gh pr create \
+              --base "${TARGET_BRANCH}" \
+              --head "${SYNC_BRANCH}" \
+              --title "Sync upstream/${UPSTREAM_BRANCH} into ${TARGET_BRANCH}" \
+              --body-file /tmp/upstream-sync-pr.md \
+              --label "${SYNC_LABEL}"
+          fi
