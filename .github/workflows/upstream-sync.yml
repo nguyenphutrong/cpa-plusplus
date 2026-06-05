@@ -7,10 +7,10 @@ on:
         description: Upstream repository in owner/name format
         required: false
         default: router-for-me/CLIProxyAPI
-      upstream_branch:
-        description: Upstream branch to merge
+      upstream_ref:
+        description: Upstream ref to merge. Use latest-tag, a branch, or a tag
         required: false
-        default: main
+        default: latest-tag
       target_branch:
         description: Fork branch to update
         required: false
@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       UPSTREAM_REPOSITORY: ${{ github.event.inputs.upstream_repository || 'router-for-me/CLIProxyAPI' }}
-      UPSTREAM_BRANCH: ${{ github.event.inputs.upstream_branch || 'main' }}
+      UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'latest-tag' }}
       TARGET_BRANCH: ${{ github.event.inputs.target_branch || 'main' }}
       SYNC_LABEL: upstream-sync
     steps:
@@ -50,20 +50,52 @@ jobs:
         run: |
           git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
           git fetch --prune origin "${TARGET_BRANCH}"
-          git fetch --prune upstream "${UPSTREAM_BRANCH}"
+          git fetch --prune --no-tags upstream '+refs/heads/*:refs/remotes/upstream/*'
+
+      - name: Resolve upstream ref
+        run: |
+          if [ "${UPSTREAM_REF}" = "latest-tag" ]; then
+            upstream_name=$(git ls-remote --tags --refs --sort='v:refname' upstream | awk -F/ '{print $NF}' | tail -n 1)
+            if [ -z "${upstream_name}" ]; then
+              echo "No upstream tags found."
+              exit 1
+            fi
+            git fetch --no-tags upstream "refs/tags/${upstream_name}:refs/tags/${upstream_name}"
+            upstream_revision="refs/tags/${upstream_name}"
+            upstream_type="tag"
+          elif git rev-parse --verify --quiet "upstream/${UPSTREAM_REF}" >/dev/null; then
+            upstream_name="${UPSTREAM_REF}"
+            upstream_revision="upstream/${UPSTREAM_REF}"
+            upstream_type="branch"
+          elif git ls-remote --exit-code --tags --refs upstream "refs/tags/${UPSTREAM_REF}" >/dev/null; then
+            git fetch --no-tags upstream "refs/tags/${UPSTREAM_REF}:refs/tags/${UPSTREAM_REF}"
+            upstream_name="${UPSTREAM_REF}"
+            upstream_revision="refs/tags/${UPSTREAM_REF}"
+            upstream_type="tag"
+          else
+            echo "Could not find upstream ref '${UPSTREAM_REF}' as a branch or tag."
+            exit 1
+          fi
+
+          upstream_commit=$(git rev-list -n 1 "${upstream_revision}")
+          echo "UPSTREAM_NAME=${upstream_name}" >> "$GITHUB_ENV"
+          echo "UPSTREAM_REVISION=${upstream_revision}" >> "$GITHUB_ENV"
+          echo "UPSTREAM_COMMIT=${upstream_commit}" >> "$GITHUB_ENV"
+          echo "UPSTREAM_TYPE=${upstream_type}" >> "$GITHUB_ENV"
+          echo "Resolved upstream ${upstream_type} '${upstream_name}' to ${upstream_commit}."
 
       - name: Calculate upstream drift
         id: drift
         run: |
-          behind=$(git rev-list --count "HEAD..upstream/${UPSTREAM_BRANCH}")
-          ahead=$(git rev-list --count "upstream/${UPSTREAM_BRANCH}..HEAD")
+          behind=$(git rev-list --count "HEAD..${UPSTREAM_COMMIT}")
+          ahead=$(git rev-list --count "${UPSTREAM_COMMIT}..HEAD")
           echo "behind=${behind}" >> "$GITHUB_OUTPUT"
           echo "ahead=${ahead}" >> "$GITHUB_OUTPUT"
-          echo "Fork is ${behind} commit(s) behind and ${ahead} commit(s) ahead of upstream/${UPSTREAM_BRANCH}."
+          echo "Fork is ${behind} commit(s) behind and ${ahead} commit(s) ahead of upstream ${UPSTREAM_TYPE} ${UPSTREAM_NAME}."
 
       - name: Stop when already up to date
         if: steps.drift.outputs.behind == '0'
-        run: echo "${TARGET_BRANCH} already contains upstream/${UPSTREAM_BRANCH}."
+        run: echo "${TARGET_BRANCH} already contains upstream ${UPSTREAM_TYPE} ${UPSTREAM_NAME}."
 
       - name: Prepare sync branch
         if: steps.drift.outputs.behind != '0'
@@ -77,7 +109,7 @@ jobs:
         id: merge
         continue-on-error: true
         run: |
-          git merge --no-edit "upstream/${UPSTREAM_BRANCH}"
+          git merge --no-edit "${UPSTREAM_COMMIT}"
 
       - name: Collect conflict details
         if: steps.drift.outputs.behind != '0' && steps.merge.outcome == 'failure'
@@ -96,7 +128,7 @@ jobs:
           {
             echo "## Upstream sync conflict"
             echo
-            echo "Automated upstream sync could not merge \`${UPSTREAM_REPOSITORY}:${UPSTREAM_BRANCH}\` into \`${TARGET_BRANCH}\`."
+            echo "Automated upstream sync could not merge \`${UPSTREAM_REPOSITORY}:${UPSTREAM_NAME}\` into \`${TARGET_BRANCH}\`."
             echo
             echo "Fork drift: ${{ steps.drift.outputs.behind }} commit(s) behind, ${{ steps.drift.outputs.ahead }} commit(s) ahead."
             echo
@@ -162,7 +194,7 @@ jobs:
 
           ## Upstream sync
 
-          - Upstream: \`${UPSTREAM_REPOSITORY}:${UPSTREAM_BRANCH}\`
+          - Upstream: \`${UPSTREAM_REPOSITORY}:${UPSTREAM_NAME}\` (${UPSTREAM_TYPE})
           - Target: \`${TARGET_BRANCH}\`
           - Fork drift before sync: ${{ steps.drift.outputs.behind }} commit(s) behind, ${{ steps.drift.outputs.ahead }} commit(s) ahead
 
@@ -180,12 +212,12 @@ jobs:
 
           existing_pr=$(gh pr list --head "${SYNC_BRANCH}" --base "${TARGET_BRANCH}" --state open --json number --jq '.[0].number')
           if [ -n "${existing_pr}" ]; then
-            gh pr edit "${existing_pr}" --title "Sync upstream/${UPSTREAM_BRANCH} into ${TARGET_BRANCH}" --body-file /tmp/upstream-sync-pr.md --add-label "${SYNC_LABEL}"
+            gh pr edit "${existing_pr}" --title "Sync upstream ${UPSTREAM_NAME} into ${TARGET_BRANCH}" --body-file /tmp/upstream-sync-pr.md --add-label "${SYNC_LABEL}"
           else
             gh pr create \
               --base "${TARGET_BRANCH}" \
               --head "${SYNC_BRANCH}" \
-              --title "Sync upstream/${UPSTREAM_BRANCH} into ${TARGET_BRANCH}" \
+              --title "Sync upstream ${UPSTREAM_NAME} into ${TARGET_BRANCH}" \
               --body-file /tmp/upstream-sync-pr.md \
               --label "${SYNC_LABEL}"
           fi
