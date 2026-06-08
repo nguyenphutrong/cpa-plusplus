@@ -19,7 +19,7 @@ import (
 func TestVirtualModelsManagementPutGetPatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(configPath, []byte("port: 8317\n"), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte("port: 8386\n"), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	manager := coreauth.NewManager(nil, nil, nil)
@@ -74,7 +74,7 @@ func TestVirtualModelsManagementPutGetPatch(t *testing.T) {
 func TestVirtualModelsManagementRejectsInvalidPayload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(configPath, []byte("port: 8317\n"), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte("port: 8386\n"), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	h := NewHandler(&config.Config{}, configPath, coreauth.NewManager(nil, nil, nil))

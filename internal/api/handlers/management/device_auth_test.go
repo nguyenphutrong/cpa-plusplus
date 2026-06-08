@@ -109,7 +109,7 @@ func TestStartProviderOAuthCodexReturnsCallbackSession(t *testing.T) {
 	resetCallbackForwardersForTest(t)
 	requireCallbackPortAvailable(t, codexCallbackPort)
 
-	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir(), Port: 8317}, coreauth.NewManager(nil, nil, nil))
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir(), Port: 8386}, coreauth.NewManager(nil, nil, nil))
 
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
@@ -150,7 +150,7 @@ func TestStartProviderOAuthAntigravityReturnsCallbackSession(t *testing.T) {
 	resetCallbackForwardersForTest(t)
 	requireCallbackPortAvailable(t, antigravity.CallbackPort)
 
-	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir(), Port: 8317}, coreauth.NewManager(nil, nil, nil))
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir(), Port: 8386}, coreauth.NewManager(nil, nil, nil))
 
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)

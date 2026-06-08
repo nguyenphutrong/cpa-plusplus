@@ -28,7 +28,7 @@ COPY config.example.yaml /cpa-plusplus/config.example.yaml
 
 WORKDIR /cpa-plusplus
 
-EXPOSE 8317
+EXPOSE 8386
 
 ENV TZ=Asia/Shanghai
 

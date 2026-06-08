@@ -323,7 +323,7 @@ func main() {
 			parsed = &config.Config{}
 		}
 		parsed.Home = homeCfg
-		parsed.Port = 8317 // Default to 8317 for home mode, can be overridden by home config
+		parsed.Port = 8386 // Default to 8386 for home mode, can be overridden by home config
 		parsed.UsageStatisticsEnabled = true
 		cfg = parsed
 

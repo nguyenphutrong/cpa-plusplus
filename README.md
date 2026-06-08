@@ -26,13 +26,13 @@ go build -o cpa-plusplus ./cmd/server
 ./cpa-plusplus --config config.yaml
 ```
 
-The default API port is `8317`. `.env` is loaded from the working directory when present.
+The default API port is `8386`. `.env` is loaded from the working directory when present.
 
 ## Docker
 
 ```bash
 docker run --rm \
-  -p 8317:8317 \
+  -p 8386:8386 \
   -v "$PWD/config.yaml:/cpa-plusplus/config.yaml" \
   -v "$PWD/auths:/root/.cli-proxy-api" \
   -v "$PWD/logs:/cpa-plusplus/logs" \

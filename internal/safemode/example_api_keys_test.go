@@ -88,14 +88,14 @@ func TestExampleAPIKeyWarningHandler(t *testing.T) {
 }
 
 func TestWarningServerURL(t *testing.T) {
-	cfg := &config.Config{Port: 8317}
-	if got := WarningServerURL(cfg); got != "http://127.0.0.1:8317/" {
+	cfg := &config.Config{Port: 8386}
+	if got := WarningServerURL(cfg); got != "http://127.0.0.1:8386/" {
 		t.Fatalf("WarningServerURL() = %q", got)
 	}
 
 	cfg.Host = "::1"
 	cfg.TLS.Enable = true
-	if got := WarningServerURL(cfg); got != "https://[::1]:8317/" {
+	if got := WarningServerURL(cfg); got != "https://[::1]:8386/" {
 		t.Fatalf("WarningServerURL() = %q", got)
 	}
 }
