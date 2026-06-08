@@ -77,17 +77,18 @@ Upstream CLIProxyAPI tags use plain versions such as `v7.1.19`. This fork publis
 as `v<upstream-version>-plus.<fork-release>`, for example `v7.1.19-plus.1`,
 `v7.1.19-plus.2`, and `v7.1.20-plus.1`.
 
-Only tags matching `v*-plus.*` publish GitHub release artifacts through GoReleaser and
-multi-architecture container images to GitHub Container Registry. Each fork release publishes both
-the immutable version tag and `latest`, for example:
+Only tags matching `v*-plus.*` publish GitHub release artifacts and multi-architecture container
+images to GitHub Container Registry. Each fork release publishes both the immutable version tag and
+`latest`, for example:
 
 ```bash
 ghcr.io/nguyenphutrong/cpa-plusplus:v7.1.19-plus.1
 ghcr.io/nguyenphutrong/cpa-plusplus:latest
 ```
 
-GoReleaser builds the `cpa-plusplus` binary for Linux, Windows, macOS, and FreeBSD on `amd64` and
-`arm64`.
+The release workflow builds the `cpa-plusplus` binary for Linux, Windows, macOS, and FreeBSD on
+`amd64` and `arm64`. Linux release assets include the default plugin-capable GLIBC build and a
+portable `no-plugin` build.
 
 ## Development
 

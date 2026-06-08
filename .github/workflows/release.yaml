@@ -27,13 +27,13 @@ jobs:
           trap 'rm -f "$release_notes_file" "$current_notes_file" "$updated_notes_file"' EXIT
 
           cat > "$release_notes_file" <<'EOF'
-          <!-- cliproxyapi-linux-release-assets:start -->
+          <!-- cpa-plusplus-linux-release-assets:start -->
           ## Linux release assets
 
-          - `CLIProxyAPI_<version>_linux_<arch>.tar.gz` is the default Linux build. It supports dynamic library plugins and is built against a GLIBC 2.17 baseline.
-          - `CLIProxyAPI_<version>_linux_<arch>_no-plugin.tar.gz` is the portable Linux build for musl-based or older systems such as OpenWrt. It does not support dynamic library plugins.
+          - `cpa-plusplus_<version>_linux_<arch>.tar.gz` is the default Linux build. It supports dynamic library plugins and is built against a GLIBC 2.17 baseline.
+          - `cpa-plusplus_<version>_linux_<arch>_no-plugin.tar.gz` is the portable Linux build for musl-based or older systems such as OpenWrt. It does not support dynamic library plugins.
 
-          <!-- cliproxyapi-linux-release-assets:end -->
+          <!-- cpa-plusplus-linux-release-assets:end -->
           EOF
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
@@ -46,8 +46,8 @@ jobs:
             cat "$release_notes_file"
             printf '\n'
             awk '
-              /^<!-- cliproxyapi-linux-release-assets:start -->$/ { skip = 1; next }
-              /^<!-- cliproxyapi-linux-release-assets:end -->$/ { skip = 0; next }
+              /^<!-- (cliproxyapi|cpa-plusplus)-linux-release-assets:start -->$/ { skip = 1; next }
+              /^<!-- (cliproxyapi|cpa-plusplus)-linux-release-assets:end -->$/ { skip = 0; next }
               !skip { print }
             ' "$current_notes_file"
           } > "$updated_notes_file"
@@ -128,13 +128,13 @@ jobs:
           ARCHIVE_FORMAT: ${{ matrix.archive_format }}
         run: |
           set -euo pipefail
-          binary_name="cli-proxy-api"
+          binary_name="cpa-plusplus"
           if [[ "$GOOS" == "windows" ]]; then
-            binary_name="cli-proxy-api.exe"
+            binary_name="cpa-plusplus.exe"
           fi
 
           archive_dir="dist/${TARGET}/archive"
-          archive_name="CLIProxyAPI_${RELEASE_VERSION}_${GOOS}_${ASSET_ARCH}.${ARCHIVE_FORMAT}"
+          archive_name="cpa-plusplus_${RELEASE_VERSION}_${GOOS}_${ASSET_ARCH}.${ARCHIVE_FORMAT}"
           rm -rf "dist/${TARGET}"
           mkdir -p "$archive_dir"
 
@@ -151,7 +151,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: dist/CLIProxyAPI_*
+          path: dist/cpa-plusplus_*
           if-no-files-found: error
       - name: Upload release assets
         shell: bash
@@ -160,7 +160,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(dist/CLIProxyAPI_*.tar.gz dist/CLIProxyAPI_*.zip)
+          assets=(dist/cpa-plusplus_*.tar.gz dist/cpa-plusplus_*.zip)
           if [[ ${#assets[@]} -eq 0 ]]; then
             printf 'expected archive assets, found %s\n' "${#assets[@]}" >&2
             printf '%s\n' "${assets[@]}" >&2
@@ -177,14 +177,14 @@ jobs:
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "$tmp_dir"' EXIT
           gh release download "$GITHUB_REF_NAME" \
-            --pattern 'CLIProxyAPI_*.tar.gz' \
-            --pattern 'CLIProxyAPI_*.zip' \
+            --pattern 'cpa-plusplus_*.tar.gz' \
+            --pattern 'cpa-plusplus_*.zip' \
             --dir "$tmp_dir" \
             --clobber
           (
             cd "$tmp_dir"
             shopt -s nullglob
-            archives=(CLIProxyAPI_*.tar.gz CLIProxyAPI_*.zip)
+            archives=(cpa-plusplus_*.tar.gz cpa-plusplus_*.zip)
             if [[ ${#archives[@]} -eq 0 ]]; then
               echo "No release archives found"
               exit 0
@@ -246,7 +246,7 @@ jobs:
           set -euo pipefail
 
           archive_dir="dist/${TARGET}/archive"
-          archive_name="CLIProxyAPI_${RELEASE_VERSION}_linux_${ASSET_ARCH}.tar.gz"
+          archive_name="cpa-plusplus_${RELEASE_VERSION}_linux_${ASSET_ARCH}.tar.gz"
           rm -rf "dist/${TARGET}"
           mkdir -p "$archive_dir"
 
@@ -268,9 +268,9 @@ jobs:
 
               CGO_ENABLED=1 GOOS=linux GOARCH="${GOARCH}" go build -buildvcs=false \
                 -ldflags="-s -w -X main.Version=${RELEASE_VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
-                -o "'"$archive_dir"'/cli-proxy-api" ./cmd/server/
+                -o "'"$archive_dir"'/cpa-plusplus" ./cmd/server/
 
-              glibc_versions="$(readelf --version-info "'"$archive_dir"'/cli-proxy-api" | sed -n "s/.*Name: GLIBC_\([0-9.]*\).*/\1/p" | sort -Vu)"
+              glibc_versions="$(readelf --version-info "'"$archive_dir"'/cpa-plusplus" | sed -n "s/.*Name: GLIBC_\([0-9.]*\).*/\1/p" | sort -Vu)"
               if [[ -n "${glibc_versions}" ]]; then
                 printf "GLIBC versions:\n%s\n" "${glibc_versions}"
                 max_glibc="$(printf "%s\n" "${glibc_versions}" | sort -V | tail -n 1)"
@@ -282,11 +282,11 @@ jobs:
             '
 
           cp LICENSE README.md README_CN.md config.example.yaml "$archive_dir/"
-          tar -C "$archive_dir" -czf "dist/$archive_name" cli-proxy-api LICENSE README.md README_CN.md config.example.yaml
+          tar -C "$archive_dir" -czf "dist/$archive_name" cpa-plusplus LICENSE README.md README_CN.md config.example.yaml
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: dist/CLIProxyAPI_*
+          path: dist/cpa-plusplus_*
           if-no-files-found: error
       - name: Upload release assets
         shell: bash
@@ -295,7 +295,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(dist/CLIProxyAPI_*.tar.gz)
+          assets=(dist/cpa-plusplus_*.tar.gz)
           if [[ ${#assets[@]} -eq 0 ]]; then
             printf 'expected archive assets, found %s\n' "${#assets[@]}" >&2
             printf '%s\n' "${assets[@]}" >&2
@@ -312,14 +312,14 @@ jobs:
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "$tmp_dir"' EXIT
           gh release download "$GITHUB_REF_NAME" \
-            --pattern 'CLIProxyAPI_*.tar.gz' \
-            --pattern 'CLIProxyAPI_*.zip' \
+            --pattern 'cpa-plusplus_*.tar.gz' \
+            --pattern 'cpa-plusplus_*.zip' \
             --dir "$tmp_dir" \
             --clobber
           (
             cd "$tmp_dir"
             shopt -s nullglob
-            archives=(CLIProxyAPI_*.tar.gz CLIProxyAPI_*.zip)
+            archives=(cpa-plusplus_*.tar.gz cpa-plusplus_*.zip)
             if [[ ${#archives[@]} -eq 0 ]]; then
               echo "No release archives found"
               exit 0
@@ -389,26 +389,26 @@ jobs:
           set -euo pipefail
 
           archive_dir="dist/${TARGET}/archive"
-          archive_name="CLIProxyAPI_${RELEASE_VERSION}_linux_${ASSET_ARCH}_no-plugin.tar.gz"
+          archive_name="cpa-plusplus_${RELEASE_VERSION}_linux_${ASSET_ARCH}_no-plugin.tar.gz"
           rm -rf "dist/${TARGET}"
           mkdir -p "$archive_dir"
 
           CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" go build -buildvcs=false \
             -ldflags="-s -w -X main.Version=${RELEASE_VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
-            -o "$archive_dir/cli-proxy-api" ./cmd/server/
+            -o "$archive_dir/cpa-plusplus" ./cmd/server/
 
-          if readelf -l "$archive_dir/cli-proxy-api" | grep -q 'Requesting program interpreter'; then
-            readelf -l "$archive_dir/cli-proxy-api" >&2
+          if readelf -l "$archive_dir/cpa-plusplus" | grep -q 'Requesting program interpreter'; then
+            readelf -l "$archive_dir/cpa-plusplus" >&2
             echo "no-plugin linux binary must not require a dynamic interpreter" >&2
             exit 1
           fi
 
           cp LICENSE README.md README_CN.md config.example.yaml "$archive_dir/"
-          tar -C "$archive_dir" -czf "dist/$archive_name" cli-proxy-api LICENSE README.md README_CN.md config.example.yaml
+          tar -C "$archive_dir" -czf "dist/$archive_name" cpa-plusplus LICENSE README.md README_CN.md config.example.yaml
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: dist/CLIProxyAPI_*
+          path: dist/cpa-plusplus_*
           if-no-files-found: error
       - name: Upload release assets
         shell: bash
@@ -417,7 +417,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(dist/CLIProxyAPI_*.tar.gz)
+          assets=(dist/cpa-plusplus_*.tar.gz)
           if [[ ${#assets[@]} -eq 0 ]]; then
             printf 'expected archive assets, found %s\n' "${#assets[@]}" >&2
             printf '%s\n' "${assets[@]}" >&2
@@ -434,14 +434,14 @@ jobs:
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "$tmp_dir"' EXIT
           gh release download "$GITHUB_REF_NAME" \
-            --pattern 'CLIProxyAPI_*.tar.gz' \
-            --pattern 'CLIProxyAPI_*.zip' \
+            --pattern 'cpa-plusplus_*.tar.gz' \
+            --pattern 'cpa-plusplus_*.zip' \
             --dir "$tmp_dir" \
             --clobber
           (
             cd "$tmp_dir"
             shopt -s nullglob
-            archives=(CLIProxyAPI_*.tar.gz CLIProxyAPI_*.zip)
+            archives=(cpa-plusplus_*.tar.gz cpa-plusplus_*.zip)
             if [[ ${#archives[@]} -eq 0 ]]; then
               echo "No release archives found"
               exit 0
@@ -520,7 +520,7 @@ jobs:
           packages: ./cmd/server/
           targets: ${{ env.TARGET }}
           out-dir: dist/${{ env.TARGET }}/bin
-          output: cli-proxy-api
+          output: cpa-plusplus
           flags: >-
             -ldflags=-s -w
             -X main.Version=${{ steps.metadata.outputs.release_version }}
@@ -532,17 +532,17 @@ jobs:
           set -euo pipefail
 
           archive_dir="dist/${TARGET}/archive"
-          archive_name="CLIProxyAPI_${RELEASE_VERSION}_freebsd_${ASSET_ARCH}.tar.gz"
+          archive_name="cpa-plusplus_${RELEASE_VERSION}_freebsd_${ASSET_ARCH}.tar.gz"
           mkdir -p "$archive_dir"
 
           echo "Packaging ${archive_name}"
-          cp "dist/${TARGET}/bin/cli-proxy-api" "$archive_dir/cli-proxy-api"
+          cp "dist/${TARGET}/bin/cpa-plusplus" "$archive_dir/cpa-plusplus"
           cp LICENSE README.md README_CN.md config.example.yaml "$archive_dir/"
-          tar -C "$archive_dir" -czf "dist/$archive_name" cli-proxy-api LICENSE README.md README_CN.md config.example.yaml
+          tar -C "$archive_dir" -czf "dist/$archive_name" cpa-plusplus LICENSE README.md README_CN.md config.example.yaml
       - uses: actions/upload-artifact@v4
         with:
           name: freebsd-${{ matrix.goarch }}
-          path: dist/CLIProxyAPI_*
+          path: dist/cpa-plusplus_*
           if-no-files-found: error
       - name: Upload release assets
         shell: bash
@@ -551,7 +551,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(dist/CLIProxyAPI_*.tar.gz)
+          assets=(dist/cpa-plusplus_*.tar.gz)
           if [[ ${#assets[@]} -eq 0 ]]; then
             printf 'expected archive assets, found %s\n' "${#assets[@]}" >&2
             printf '%s\n' "${assets[@]}" >&2
@@ -568,14 +568,14 @@ jobs:
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "$tmp_dir"' EXIT
           gh release download "$GITHUB_REF_NAME" \
-            --pattern 'CLIProxyAPI_*.tar.gz' \
-            --pattern 'CLIProxyAPI_*.zip' \
+            --pattern 'cpa-plusplus_*.tar.gz' \
+            --pattern 'cpa-plusplus_*.zip' \
             --dir "$tmp_dir" \
             --clobber
           (
             cd "$tmp_dir"
             shopt -s nullglob
-            archives=(CLIProxyAPI_*.tar.gz CLIProxyAPI_*.zip)
+            archives=(cpa-plusplus_*.tar.gz cpa-plusplus_*.zip)
             if [[ ${#archives[@]} -eq 0 ]]; then
               echo "No release archives found"
               exit 0
@@ -588,25 +588,8 @@ jobs:
           )
           gh release upload "$GITHUB_REF_NAME" "$tmp_dir/checksums.txt" --clobber
 
-      - name: Trigger homebrew-tap update
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          HTTP_CODE=$(curl -sL -w "%{http_code}" -o /tmp/homebrew-dispatch-response.json \
-            -X POST \
-            -H "Authorization: token ${{ secrets.TAP_GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/nguyenphutrong/homebrew-tap/dispatches \
-            -d "{\"event_type\":\"cpa-plusplus-release\",\"client_payload\":{\"version\":\"${VERSION}\"}}")
-
-          if [ "$HTTP_CODE" != "204" ]; then
-            cat /tmp/homebrew-dispatch-response.json
-            echo "::error::Failed to trigger homebrew-tap update. HTTP status: $HTTP_CODE"
-            exit 1
-          fi
-
   publish-checksums:
     runs-on: ubuntu-latest
-    if: always()
     needs:
       - build-hosted
       - build-linux-glibc
@@ -624,10 +607,32 @@ jobs:
           set -euo pipefail
           cd dist
           shopt -s nullglob
-          archives=(CLIProxyAPI_*.tar.gz CLIProxyAPI_*.zip)
+          archives=(cpa-plusplus_*.tar.gz cpa-plusplus_*.zip)
           if [[ ${#archives[@]} -eq 0 ]]; then
-            echo "No release archives found"
-            exit 0
+            echo "No release archives found" >&2
+            exit 1
           fi
           sha256sum "${archives[@]}" | sort -k2 > checksums.txt
           gh release upload "$GITHUB_REF_NAME" checksums.txt --clobber
+
+  update-homebrew-tap:
+    runs-on: ubuntu-latest
+    needs:
+      - publish-checksums
+    steps:
+      - name: Trigger homebrew-tap update
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o /tmp/homebrew-dispatch-response.json \
+            -X POST \
+            -H "Authorization: token ${{ secrets.TAP_GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/nguyenphutrong/homebrew-tap/dispatches \
+            -d "{\"event_type\":\"cpa-plusplus-release\",\"client_payload\":{\"version\":\"${VERSION}\"}}")
+
+          if [ "$HTTP_CODE" != "204" ]; then
+            cat /tmp/homebrew-dispatch-response.json
+            echo "::error::Failed to trigger homebrew-tap update. HTTP status: $HTTP_CODE"
+            exit 1
+          fi
