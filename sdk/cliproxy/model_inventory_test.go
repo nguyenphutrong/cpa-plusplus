@@ -77,7 +77,7 @@ func TestRegisterModelsForAuthUsesLiveInventory(t *testing.T) {
 		},
 	}
 
-	service.registerModelsForAuth(auth)
+	service.registerModelsForAuth(t.Context(), auth)
 	models := registry.GetGlobalRegistry().GetModelsForClient(clientID)
 	if len(models) != 1 {
 		t.Fatalf("models len = %d, want 1: %#v", len(models), models)
@@ -109,7 +109,7 @@ func TestRegisterModelsForAuthPreservesPrefixBehaviorWithLiveInventory(t *testin
 		},
 	}
 
-	service.registerModelsForAuth(auth)
+	service.registerModelsForAuth(t.Context(), auth)
 	models := registry.GetGlobalRegistry().GetModelsForClient(clientID)
 	ids := modelIDSet(models)
 	if !ids["live-prefix-model"] || !ids["team-a/live-prefix-model"] {
@@ -139,7 +139,7 @@ func TestRegisterModelsForAuthForcePrefixWithLiveInventory(t *testing.T) {
 		},
 	}
 
-	service.registerModelsForAuth(auth)
+	service.registerModelsForAuth(t.Context(), auth)
 	models := registry.GetGlobalRegistry().GetModelsForClient(clientID)
 	ids := modelIDSet(models)
 	if ids["live-force-prefix-model"] || !ids["team-a/live-force-prefix-model"] {
@@ -166,7 +166,7 @@ func TestRegisterModelsForAuthFallsBackWhenInventoryEmpty(t *testing.T) {
 		},
 	}
 
-	service.registerModelsForAuth(auth)
+	service.registerModelsForAuth(t.Context(), auth)
 	models := registry.GetGlobalRegistry().GetModelsForClient(clientID)
 	if len(models) == 0 {
 		t.Fatal("expected static codex fallback models")
@@ -198,7 +198,7 @@ func TestRefreshLiveModelInventoryFailureFallsBackToStaticModels(t *testing.T) {
 	if refreshed == nil || refreshed.ModelInventory == nil || len(refreshed.ModelInventory.Warnings) == 0 {
 		t.Fatalf("expected fetch warning inventory, got %#v", refreshed)
 	}
-	service.registerModelsForAuth(refreshed)
+	service.registerModelsForAuth(t.Context(), refreshed)
 	models := registry.GetGlobalRegistry().GetModelsForClient(clientID)
 	if len(models) == 0 {
 		t.Fatal("expected static codex fallback models after fetch failure")
