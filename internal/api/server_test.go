@@ -19,6 +19,7 @@ import (
 	gin "github.com/gin-gonic/gin"
 	proxyconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
@@ -27,6 +28,11 @@ import (
 )
 
 func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	return newTestServerWithOptions(t)
+}
+
+func newTestServerWithOptions(t *testing.T, opts ...ServerOption) *Server {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
@@ -52,7 +58,7 @@ func newTestServer(t *testing.T) *Server {
 	accessManager := sdkaccess.NewManager()
 
 	configPath := filepath.Join(tmpDir, "config.yaml")
-	return NewServer(cfg, authManager, accessManager, configPath)
+	return NewServer(cfg, authManager, accessManager, configPath, opts...)
 }
 
 func TestHealthz(t *testing.T) {
@@ -179,6 +185,30 @@ func assertHTTP1RequestClosesConnection(t *testing.T, handler http.Handler, path
 		t.Fatal("connection remained readable after response; want server close")
 	} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 		t.Fatalf("connection stayed open until timeout; want server close")
+	}
+}
+
+func TestNewServerWithPluginHostInjectsHandlerInterceptors(t *testing.T) {
+	host := pluginhost.New()
+	server := newTestServerWithOptions(t, WithPluginHost(host))
+
+	if server.handlers == nil {
+		t.Fatal("server handlers = nil")
+	}
+	got, ok := server.handlers.PluginHost.(*pluginhost.Host)
+	if !ok || got != host {
+		t.Fatalf("handler plugin host = %#v, want configured host", server.handlers.PluginHost)
+	}
+}
+
+func TestNewServerWithoutPluginHostLeavesHandlerInterceptorsDisabled(t *testing.T) {
+	server := newTestServer(t)
+
+	if server.handlers == nil {
+		t.Fatal("server handlers = nil")
+	}
+	if server.handlers.PluginHost != nil {
+		t.Fatalf("handler plugin host = %#v, want nil", server.handlers.PluginHost)
 	}
 }
 
