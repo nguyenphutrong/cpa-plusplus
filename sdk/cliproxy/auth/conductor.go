@@ -170,8 +170,7 @@ type Manager struct {
 	auths     map[string]*Auth
 	scheduler *authScheduler
 	// pluginScheduler runs outside m.mu before falling back to native selection.
-	pluginScheduler          PluginScheduler
-	pluginDelegateRoundRobin *RoundRobinSelector
+	pluginScheduler PluginScheduler
 	// homeRuntimeAuths caches auths returned by Home so websocket sessions can
 	// reuse an established upstream credential without dispatching every turn.
 	homeRuntimeAuths map[string]map[string]*Auth
@@ -216,15 +215,14 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		hook = NoopHook{}
 	}
 	manager := &Manager{
-		store:                    store,
-		executors:                make(map[string]ProviderExecutor),
-		selector:                 selector,
-		hook:                     hook,
-		auths:                    make(map[string]*Auth),
-		pluginDelegateRoundRobin: &RoundRobinSelector{},
-		homeRuntimeAuths:         make(map[string]map[string]*Auth),
-		providerOffsets:          make(map[string]int),
-		modelPoolOffsets:         make(map[string]int),
+		store:            store,
+		executors:        make(map[string]ProviderExecutor),
+		selector:         selector,
+		hook:             hook,
+		auths:            make(map[string]*Auth),
+		homeRuntimeAuths: make(map[string]map[string]*Auth),
+		providerOffsets:  make(map[string]int),
+		modelPoolOffsets: make(map[string]int),
 	}
 	// atomic.Value requires non-nil initial value.
 	manager.runtimeConfig.Store(&internalconfig.Config{})
@@ -239,9 +237,6 @@ func (m *Manager) SetPluginScheduler(scheduler PluginScheduler) {
 	}
 	m.mu.Lock()
 	m.pluginScheduler = scheduler
-	if m.pluginDelegateRoundRobin == nil {
-		m.pluginDelegateRoundRobin = &RoundRobinSelector{}
-	}
 	m.mu.Unlock()
 }
 
@@ -929,7 +924,57 @@ func pickSchedulerAuthByID(candidates []*Auth, authID string) *Auth {
 	return nil
 }
 
-func (m *Manager) pickViaPluginScheduler(ctx context.Context, scheduler PluginScheduler, roundRobin *RoundRobinSelector, provider string, providers []string, model string, opts cliproxyexecutor.Options, candidates []*Auth) (*Auth, bool, error) {
+func builtinSchedulerStrategy(delegate string) (schedulerStrategy, bool) {
+	switch strings.TrimSpace(delegate) {
+	case pluginapi.SchedulerBuiltinRoundRobin:
+		return schedulerStrategyRoundRobin, true
+	case pluginapi.SchedulerBuiltinFillFirst:
+		return schedulerStrategyFillFirst, true
+	default:
+		return schedulerStrategyCustom, false
+	}
+}
+
+func (m *Manager) pickViaBuiltinScheduler(ctx context.Context, strategy schedulerStrategy, provider string, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}) (*Auth, bool, error) {
+	if m == nil || m.scheduler == nil {
+		return nil, false, nil
+	}
+	providerKey := strings.ToLower(strings.TrimSpace(provider))
+	disallowFreeAuth := disallowFreeAuthFromMetadata(opts.Metadata)
+	for {
+		var selected *Auth
+		var errPick error
+		if providerKey == "mixed" {
+			selected, _, errPick = m.scheduler.pickMixedWithStrategy(ctx, providers, model, opts, tried, strategy)
+			if errPick != nil && model != "" && shouldRetrySchedulerPick(errPick) {
+				m.syncScheduler()
+				selected, _, errPick = m.scheduler.pickMixedWithStrategy(ctx, providers, model, opts, tried, strategy)
+			}
+		} else {
+			selected, errPick = m.scheduler.pickSingleWithStrategy(ctx, providerKey, model, opts, tried, strategy)
+			if errPick != nil && model != "" && shouldRetrySchedulerPick(errPick) {
+				m.syncScheduler()
+				selected, errPick = m.scheduler.pickSingleWithStrategy(ctx, providerKey, model, opts, tried, strategy)
+			}
+		}
+		if errPick != nil {
+			return nil, true, errPick
+		}
+		if selected == nil {
+			return nil, true, &Error{Code: "auth_not_found", Message: "selector returned no auth"}
+		}
+		if disallowFreeAuth && isFreeCodexAuth(selected) {
+			if tried == nil {
+				tried = make(map[string]struct{})
+			}
+			tried[selected.ID] = struct{}{}
+			continue
+		}
+		return selected, true, nil
+	}
+}
+
+func (m *Manager) pickViaPluginScheduler(ctx context.Context, scheduler PluginScheduler, provider string, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}, candidates []*Auth) (*Auth, bool, error) {
 	if scheduler == nil || len(candidates) == 0 {
 		return nil, false, nil
 	}
@@ -957,25 +1002,11 @@ func (m *Manager) pickViaPluginScheduler(ctx context.Context, scheduler PluginSc
 		return selected, true, nil
 	}
 
-	switch strings.TrimSpace(resp.DelegateBuiltin) {
-	case pluginapi.SchedulerBuiltinRoundRobin:
-		if roundRobin == nil {
-			roundRobin = &RoundRobinSelector{}
-		}
-		selected, errSelect := roundRobin.Pick(ctx, providerKey, "", opts, candidates)
-		if errSelect != nil {
-			return nil, true, errSelect
-		}
-		return selected, true, nil
-	case pluginapi.SchedulerBuiltinFillFirst:
-		selected, errSelect := (&FillFirstSelector{}).Pick(ctx, providerKey, "", opts, candidates)
-		if errSelect != nil {
-			return nil, true, errSelect
-		}
-		return selected, true, nil
-	default:
+	strategy, okStrategy := builtinSchedulerStrategy(resp.DelegateBuiltin)
+	if !okStrategy {
 		return nil, false, nil
 	}
+	return m.pickViaBuiltinScheduler(ctx, strategy, providerKey, providers, model, opts, tried)
 }
 
 func (m *Manager) authSupportsRouteModel(registryRef *registry.ModelRegistry, auth *Auth, routeModel string) bool {
@@ -3573,7 +3604,6 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 	m.mu.RLock()
 	selector := m.selector
 	pluginScheduler := m.pluginScheduler
-	pluginDelegateRoundRobin := m.pluginDelegateRoundRobin
 	executor, okExecutor := m.executors[provider]
 	if !okExecutor {
 		m.mu.RUnlock()
@@ -3619,7 +3649,7 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 	available = cloneAuthSlice(available)
 	m.mu.RUnlock()
 
-	selected, handled, errPick := m.pickViaPluginScheduler(ctx, pluginScheduler, pluginDelegateRoundRobin, provider, []string{provider}, model, opts, available)
+	selected, handled, errPick := m.pickViaPluginScheduler(ctx, pluginScheduler, provider, []string{provider}, model, opts, tried, available)
 	if errPick != nil {
 		return nil, nil, errPick
 	}
@@ -3729,7 +3759,6 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 	m.mu.RLock()
 	selector := m.selector
 	pluginScheduler := m.pluginScheduler
-	pluginDelegateRoundRobin := m.pluginDelegateRoundRobin
 	candidates := make([]*Auth, 0, len(m.auths))
 	modelKey := strings.TrimSpace(model)
 	// Always use base model name (without thinking suffix) for auth matching.
@@ -3780,7 +3809,7 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 	available = cloneAuthSlice(available)
 	m.mu.RUnlock()
 
-	selected, handled, errPick := m.pickViaPluginScheduler(ctx, pluginScheduler, pluginDelegateRoundRobin, "mixed", providers, model, opts, available)
+	selected, handled, errPick := m.pickViaPluginScheduler(ctx, pluginScheduler, "mixed", providers, model, opts, tried, available)
 	if errPick != nil {
 		return nil, nil, "", errPick
 	}
